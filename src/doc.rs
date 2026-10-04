@@ -8,6 +8,10 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
+/// "Sparad" toast: fade in, hold, fade out.
+const TOAST_IN: f32 = 0.15;
+const TOAST_HOLD: f32 = 2.5;
+const TOAST_OUT: f32 = 0.6;
 
 pub enum Status {
     Idle,
@@ -37,6 +41,8 @@ pub struct Doc {
     pub preview: bool,
     pub name_takeover: Option<String>,
     pub name_msg: Option<String>,
+    /// (first save of the current toast, latest save) — drives the transient "Sparad" toast.
+    toast: Option<(Instant, Instant)>,
 }
 
 impl Doc {
@@ -58,6 +64,7 @@ impl Doc {
             preview: false,
             name_takeover: None,
             name_msg: None,
+            toast: None,
         }
     }
 
@@ -110,6 +117,12 @@ impl Doc {
                 self.dirty = false;
                 if self.id.is_some() {
                     self.status = Status::Saved(chrono::Local::now().format("%H:%M:%S").to_string());
+                    let now = Instant::now();
+                    let start = match self.toast {
+                        Some((s, _)) if self.toast_alpha(now) > 0.0 => s, // still visible: just extend
+                        _ => now,
+                    };
+                    self.toast = Some((start, now));
                 }
             }
             Err(e) => self.fail(format!("sparning: {e}")),
@@ -233,10 +246,56 @@ impl Doc {
         self.mark_dirty();
     }
 
+    fn toast_alpha(&self, now: Instant) -> f32 {
+        let Some((start, last)) = self.toast else { return 0.0 };
+        let fade_in = (now.duration_since(start).as_secs_f32() / TOAST_IN).min(1.0);
+        let since = now.duration_since(last).as_secs_f32();
+        let fade_out = if since <= TOAST_HOLD { 1.0 } else { 1.0 - (since - TOAST_HOLD) / TOAST_OUT };
+        (fade_in * fade_out).clamp(0.0, 1.0)
+    }
+
+    /// Permanent state: a small dot (green = everything on disk, amber = unsaved, red = error).
+    pub fn indicator(&self, ui: &mut Ui) {
+        let (col, tip) = match &self.status {
+            Status::Error(e) => (theme::ERR, e.clone()),
+            _ if self.dirty => (theme::WARN, "Osparade ändringar – sparas strax".to_string()),
+            Status::Saved(t) => (theme::OK, format!("Allt sparat (senast {t})")),
+            Status::Clean => (theme::OK, "Allt sparat".to_string()),
+            Status::Idle => (theme::WEAK, "Inget att spara än".to_string()),
+        };
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+        ui.painter().circle_filled(rect.center(), 4.0, col);
+        resp.on_hover_text(tip);
+        if let Status::Error(_) = self.status {
+            ui.label(egui::RichText::new("fel vid sparning").color(theme::ERR).size(12.0));
+        }
+    }
+
+    /// Transient "✓ Sparad" pill painted over the bottom-right corner of `area` (no layout impact).
+    fn paint_toast(&self, ctx: &egui::Context, area: egui::Rect) {
+        let a = self.toast_alpha(Instant::now());
+        if a <= 0.0 {
+            return;
+        }
+        ctx.request_repaint();
+        let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, self.editor_id.with("toast")));
+        let g = p.layout_no_wrap("✓ Sparad".into(), egui::FontId::monospace(12.0), theme::OK.gamma_multiply(a));
+        let size = g.size() + egui::vec2(16.0, 8.0);
+        let rect = egui::Rect::from_min_size(area.right_bottom() - size - egui::vec2(10.0, 10.0), size);
+        p.rect(
+            rect,
+            5.0,
+            theme::BG.gamma_multiply(a),
+            egui::Stroke::new(1.0, theme::OK.gamma_multiply(0.5 * a)),
+            egui::StrokeKind::Inside,
+        );
+        p.galley(rect.min + egui::vec2(8.0, 4.0), g, theme::OK);
+    }
+
     /// Framed, full-size text editor.
     pub fn editor(&mut self, ui: &mut Ui, hint: &str) {
         let ctx = ui.ctx().clone();
-        egui::Frame::new()
+        let framed = egui::Frame::new()
             .fill(theme::BG_FIELD)
             .stroke(egui::Stroke::new(1.0, theme::LINE))
             .corner_radius(6)
@@ -266,6 +325,7 @@ impl Doc {
                     self.focus = false;
                 }
             });
+        self.paint_toast(&ctx, framed.response.rect);
         if self.cursor_to_end {
             set_cursor(&ctx, self.editor_id, self.body.chars().count());
             self.cursor_to_end = false;
@@ -276,7 +336,8 @@ impl Doc {
     pub fn preview_ui(&self, ui: &mut Ui, cache: &mut egui_commonmark::CommonMarkCache, dir: &Path) {
         let mut text = self.body.clone();
         for r in db::blob_refs(&self.body) {
-            text = text.replace(&format!("(blob:{r})"), &format!("({})", blob_uri(dir, &r)));
+            // <…> lets CommonMark accept paths with spaces.
+            text = text.replace(&format!("(blob:{r})"), &format!("(<{}>)", blob_uri(dir, &r)));
         }
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui_commonmark::CommonMarkViewer::new().max_image_width(Some(720)).show(ui, cache, &text);
@@ -304,7 +365,22 @@ pub fn blob_uri(dir: &Path, r: &str) -> String {
     if hash.len() < 2 {
         return String::new();
     }
-    format!("file://{}", blob::path_for(dir, hash, ext).display())
+    // egui_extras expects file:///C:/… on Windows (file://C:\… is read as a network host).
+    file_uri(&blob::path_for(dir, hash, ext).to_string_lossy())
+}
+
+fn file_uri(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    if path.starts_with('/') { format!("file://{path}") } else { format!("file:///{path}") }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn file_uris() {
+        assert_eq!(super::file_uri(r"C:\Users\x\blobs\4d\4d9e.png"), "file:///C:/Users/x/blobs/4d/4d9e.png");
+        assert_eq!(super::file_uri("/home/x/blobs/ab/ab.png"), "file:///home/x/blobs/ab/ab.png");
+    }
 }
 
 pub fn store_image(db: &Db, dir: &Path, img: &arboard::ImageData<'_>) -> Result<String, String> {

@@ -51,8 +51,11 @@ impl App {
 
         // ---- header (drag handle) ----
         egui::Panel::top("cap_hdr").frame(bar(theme::BG, 12, 8)).show(ui, |ui| {
-            let r = ui
-                .horizontal(|ui| {
+            // Drag area first, so widgets added afterwards stay clickable on top of it.
+            if ui.interact(ui.max_rect(), Id::new("cap_drag"), Sense::drag()).drag_started() {
+                ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
+            }
+            ui.horizontal(|ui| {
                     ui.label(RichText::new("Snabbanteckning").family(theme::medium()));
                     let dest = match (&doc.saved_name, naming) {
                         (Some(n), _) => format!("→ Namngivna · {n}"),
@@ -60,12 +63,9 @@ impl App {
                         (None, false) => format!("→ Journal · {}", theme::day_short(today)),
                     };
                     ui.label(RichText::new(dest).color(theme::WEAK).size(12.0));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| theme::status_label(ui, &doc.status));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| doc.indicator(ui));
                 })
-                .response;
-            if ui.interact(r.rect, Id::new("cap_drag"), Sense::drag()).drag_started() {
-                ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
-            }
+;
         });
 
         // ---- footer ----

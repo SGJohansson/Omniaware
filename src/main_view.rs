@@ -281,8 +281,10 @@ impl App {
         egui::Panel::top("m_top")
             .frame(egui::Frame::new().fill(theme::BG_SIDE).inner_margin(Margin::symmetric(12, 7)))
             .show(ui, |ui| {
-                let r = ui
-                    .horizontal(|ui| {
+                if ui.interact(ui.max_rect(), Id::new("m_drag"), Sense::drag()).drag_started() {
+                    ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
+                }
+                ui.horizontal(|ui| {
                         ui.label(RichText::new("Omniaware").family(theme::medium()).color(theme::ACCENT));
                         ui.label(RichText::new(format!("/  {section}")).color(theme::WEAK));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -291,10 +293,7 @@ impl App {
                             new = ui.button("+ Nytt").on_hover_text("Ctrl+N").clicked();
                         });
                     })
-                    .response;
-                if ui.interact(r.rect, Id::new("m_drag"), Sense::drag()).drag_started() {
-                    ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
-                }
+;
             });
         if close {
             let ctx = ui.ctx().clone();
@@ -691,7 +690,7 @@ impl App {
                     ed.focus = !ed.preview;
                 }
                 ui.add_space(6.0);
-                theme::status_label(ui, &ed.status);
+                ed.indicator(ui);
             });
         });
         if let Some(m) = &ed.name_msg {

@@ -138,21 +138,3 @@ pub fn day_long(d: NaiveDate, today: NaiveDate) -> String {
     );
     if d.year() == today.year() { base } else { format!("{base} {}", d.year()) }
 }
-
-pub fn status_label(ui: &mut Ui, s: &crate::doc::Status) {
-    use crate::doc::Status::*;
-    match s {
-        Idle => {
-            ui.label(RichText::new("ej sparat").color(WEAK).size(12.0));
-        }
-        Clean => {
-            ui.label(RichText::new("✓ sparad").color(WEAK).size(12.0));
-        }
-        Saved(t) => {
-            ui.label(RichText::new(format!("✓ sparad {t}")).color(OK).size(12.0));
-        }
-        Error(e) => {
-            ui.label(RichText::new(e).color(ERR).size(12.0));
-        }
-    }
-}
