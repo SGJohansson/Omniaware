@@ -12,23 +12,8 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 const TOAST_IN: f32 = 0.15;
 const TOAST_HOLD: f32 = 2.5;
 const TOAST_OUT: f32 = 0.6;
-const THUMB: egui::Vec2 = egui::vec2(160.0, 96.0);
-
-/// Byte ranges of `![…](blob:…)` image references (drawn dimmed in the editor).
-fn image_spans(text: &str) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
-    let mut from = 0;
-    while let Some(i) = text[from..].find("![") {
-        let s = from + i;
-        let Some(j) = text[s..].find(')') else { break };
-        let e = s + j + 1;
-        if text[s..e].contains("(blob:") {
-            out.push((s, e));
-        }
-        from = e;
-    }
-    out
-}
+pub const THUMB: egui::Vec2 = egui::vec2(160.0, 96.0);
+pub const THUMB_LARGE: egui::Vec2 = egui::vec2(200.0, 120.0);
 
 pub enum Status {
     Idle,
@@ -41,6 +26,8 @@ pub enum Status {
 pub struct Doc {
     pub id: Option<i64>,
     pub body: String,
+    /// Attached images as blob refs ("<hash>.<ext>"), in order.
+    pub images: Vec<String>,
     /// Name field contents ("" = unnamed).
     pub name: String,
     pub saved_name: Option<String>,
@@ -67,6 +54,7 @@ impl Doc {
         Self {
             id: None,
             body: String::new(),
+            images: Vec::new(),
             name: String::new(),
             saved_name: None,
             created: db::now_ms(),
@@ -89,6 +77,7 @@ impl Doc {
         Self {
             id: Some(e.id),
             body: e.body,
+            images: e.images,
             name: e.name.clone().unwrap_or_default(),
             saved_name: e.name,
             created: e.created,
@@ -101,6 +90,11 @@ impl Doc {
 
     pub fn has_focus(&self, ctx: &egui::Context) -> bool {
         ctx.memory(|m| m.has_focus(self.editor_id))
+    }
+
+    /// Text or images — an entry worth keeping.
+    pub fn has_content(&self) -> bool {
+        !self.body.trim().is_empty() || !self.images.is_empty()
     }
 
     pub fn mark_dirty(&mut self) {
@@ -125,7 +119,7 @@ impl Doc {
             return;
         }
         let res = match self.id {
-            None if self.body.trim().is_empty() => Ok(()),
+            None if !self.has_content() => Ok(()),
             None => db.insert(&self.body).map(|id| self.id = Some(id)),
             Some(id) => db.update_body(id, &self.body),
         };
@@ -133,13 +127,7 @@ impl Doc {
             Ok(()) => {
                 self.dirty = false;
                 if self.id.is_some() {
-                    self.status = Status::Saved(chrono::Local::now().format("%H:%M:%S").to_string());
-                    let now = Instant::now();
-                    let start = match self.toast {
-                        Some((s, _)) if self.toast_alpha(now) > 0.0 => s, // still visible: just extend
-                        _ => now,
-                    };
-                    self.toast = Some((start, now));
+                    self.mark_saved();
                 }
             }
             Err(e) => self.fail(format!("sparning: {e}")),
@@ -155,7 +143,7 @@ impl Doc {
     pub fn checkpoint(&mut self, db: &Db) {
         self.flush(db);
         if let Some(id) = self.id
-            && !self.body.trim().is_empty()
+            && self.has_content()
             && let Err(e) = db.add_revision(id, &self.body)
         {
             self.fail(format!("version: {e}"));
@@ -166,7 +154,7 @@ impl Doc {
     pub fn close(&mut self, db: &Db) {
         self.flush(db);
         let Some(id) = self.id else { return };
-        let r = if !self.body.trim().is_empty() {
+        let r = if self.has_content() {
             db.add_revision(id, &self.body)
         } else if self.fresh {
             db.delete_hard(id)
@@ -194,7 +182,7 @@ impl Doc {
         if Some(&name) == self.saved_name.as_ref() || (name.is_empty() && self.saved_name.is_none()) {
             return true;
         }
-        if self.body.trim().is_empty() {
+        if !self.has_content() {
             self.name_msg = Some("Tomt inlägg, inget att namnge.".into());
             return false;
         }
@@ -242,25 +230,55 @@ impl Doc {
     }
 
     /// Ctrl+V with an image-only clipboard (egui only forwards text pastes).
-    pub fn paste_image(&mut self, ctx: &egui::Context, db: &Db, dir: &Path) {
+    pub fn paste_image(&mut self, db: &Db, dir: &Path) {
         let Ok(mut cb) = arboard::Clipboard::new() else { return };
         if cb.get_text().is_ok_and(|t| !t.is_empty()) {
             return;
         }
         let Ok(img) = cb.get_image() else { return };
-        let md = match store_image(db, dir, &img) {
-            Ok(md) => md,
-            Err(e) => return self.fail(e),
+        match store_image(db, dir, &img) {
+            Ok(r) => self.attach(db, r),
+            Err(e) => self.fail(e),
+        }
+    }
+
+    /// Adds an image; the entry is created first if needed (an image alone is content).
+    pub fn attach(&mut self, db: &Db, r: String) {
+        if self.images.contains(&r) {
+            return;
+        }
+        self.images.push(r.clone());
+        if self.id.is_none() {
+            self.dirty = true;
+            self.flush(db);
+        }
+        if let Some(id) = self.id {
+            match db.add_attachment(id, &r) {
+                Ok(()) => self.mark_saved(),
+                Err(e) => self.fail(format!("bild: {e}")),
+            }
+        }
+    }
+
+    /// Removes an image from this entry (the file stays in the blob store).
+    pub fn detach(&mut self, db: &Db, r: &str) {
+        self.images.retain(|x| x != r);
+        if let Some(id) = self.id {
+            match db.remove_attachment(id, r) {
+                Ok(()) => self.mark_saved(),
+                Err(e) => self.fail(format!("bild: {e}")),
+            }
+        }
+    }
+
+    fn mark_saved(&mut self) {
+        self.status = Status::Saved(chrono::Local::now().format("%H:%M:%S").to_string());
+        let now = Instant::now();
+        let start = match self.toast {
+            Some((s, _)) if self.toast_alpha(now) > 0.0 => s,
+            _ => now,
         };
-        let chars = self.body.chars().count();
-        let at = TextEdit::load_state(ctx, self.editor_id)
-            .and_then(|s| s.cursor.char_range())
-            .map(|r| r.primary.index.0.min(chars))
-            .unwrap_or(chars);
-        let byte = self.body.char_indices().nth(at).map(|(b, _)| b).unwrap_or(self.body.len());
-        self.body.insert_str(byte, &md);
-        set_cursor(ctx, self.editor_id, at + md.chars().count());
-        self.mark_dirty();
+        self.toast = Some((start, now));
     }
 
     fn toast_alpha(&self, now: Instant) -> f32 {
@@ -319,22 +337,6 @@ impl Doc {
             .inner_margin(egui::Margin::same(10))
             .show(ui, |ui| {
                 let avail = ui.available_size();
-                let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
-                    let text = buf.as_str();
-                    let font = egui::TextStyle::Monospace.resolve(ui.style());
-                    let normal = egui::TextFormat::simple(font.clone(), theme::TEXT);
-                    let dim = egui::TextFormat::simple(font, theme::DIM);
-                    let mut job = egui::text::LayoutJob::default();
-                    job.wrap.max_width = wrap;
-                    let mut at = 0;
-                    for (s, e) in image_spans(text) {
-                        job.append(&text[at..s], 0.0, normal.clone());
-                        job.append(&text[s..e], 0.0, dim.clone());
-                        at = e;
-                    }
-                    job.append(&text[at..], 0.0, normal);
-                    ui.fonts_mut(|f| f.layout_job(job))
-                };
                 let resp = egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -344,7 +346,6 @@ impl Doc {
                                 .id(self.editor_id)
                                 .font(egui::TextStyle::Monospace)
                                 .frame(egui::Frame::NONE)
-                                .layouter(&mut layouter)
                                 .desired_width(f32::INFINITY)
                                 .lock_focus(true)
                                 .hint_text(hint),
@@ -368,44 +369,59 @@ impl Doc {
 
     /// Rendered markdown, `blob:` refs resolved to files.
     pub fn preview_ui(&self, ui: &mut Ui, cache: &mut egui_commonmark::CommonMarkCache, dir: &Path) {
-        let mut text = self.body.clone();
-        for r in db::blob_refs(&self.body) {
-            // <…> lets CommonMark accept paths with spaces.
-            text = text.replace(&format!("(blob:{r})"), &format!("(<{}>)", blob_uri(dir, &r)));
-        }
+        // Images first, then the text. <…> lets CommonMark accept paths with spaces.
+        let mut text: String = self.images.iter().map(|r| format!("![](<{}>)\n\n", blob_uri(dir, r))).collect();
+        text.push_str(&self.body);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui_commonmark::CommonMarkViewer::new().max_image_width(Some(720)).show(ui, cache, &text);
         });
     }
 
-    /// Thumbnail strip of referenced images. Returns the ref that was clicked (open in lightbox).
-    pub fn thumbs(&self, ui: &mut Ui, dir: &Path) -> Option<String> {
-        let refs = db::blob_refs(&self.body);
-        if refs.is_empty() {
+    /// Thumbnail strip. Returns the ref that was clicked (opens the lightbox).
+    pub fn thumbs(&self, ui: &mut Ui, dir: &Path, size: egui::Vec2) -> Option<String> {
+        if self.images.is_empty() {
             return None;
         }
         let mut clicked = None;
-        egui::ScrollArea::horizontal().id_salt("thumbs").show(ui, |ui| {
+        egui::ScrollArea::horizontal().id_salt(self.editor_id.with("thumbs")).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.set_min_height(THUMB.y + 4.0);
-                for r in refs {
-                    let img = egui::Image::new(blob_uri(dir, &r))
-                        .fit_to_exact_size(THUMB)
-                        .maintain_aspect_ratio(true)
-                        .corner_radius(4)
-                        .sense(egui::Sense::click());
-                    let resp = ui.add(img).on_hover_cursor(egui::CursorIcon::ZoomIn).on_hover_text("Klicka för större bild");
-                    if resp.hovered() {
-                        ui.painter().rect_stroke(resp.rect, 4.0, egui::Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Outside);
-                    }
-                    if resp.clicked() {
-                        clicked = Some(r);
+                ui.set_min_height(size.y + 6.0);
+                for r in &self.images {
+                    if image_tile(ui, dir, r, size).clicked() {
+                        clicked = Some(r.clone());
                     }
                 }
             });
         });
         clicked
     }
+
+    /// First image large (for image-only entries). Returns true if clicked.
+    pub fn hero(&self, ui: &mut Ui, dir: &Path, max: egui::Vec2) -> bool {
+        self.images.first().is_some_and(|r| image_tile(ui, dir, r, max).clicked())
+    }
+}
+
+/// Framed, clickable image: dark backing, 1 px border, accent border on hover.
+pub fn image_tile(ui: &mut Ui, dir: &Path, r: &str, size: egui::Vec2) -> egui::Response {
+    let img = egui::Image::new(blob_uri(dir, r))
+        .fit_to_exact_size(size)
+        .maintain_aspect_ratio(true)
+        .corner_radius(4)
+        .sense(egui::Sense::click());
+    let resp = egui::Frame::new()
+        .fill(theme::BG_SIDE)
+        .stroke(egui::Stroke::new(1.0, theme::LINE))
+        .corner_radius(6)
+        .inner_margin(egui::Margin::same(3))
+        .show(ui, |ui| ui.add(img))
+        .inner
+        .on_hover_cursor(egui::CursorIcon::ZoomIn)
+        .on_hover_text("Klicka för större bild");
+    if resp.hovered() {
+        ui.painter().rect_stroke(resp.rect.expand(3.0), 6.0, egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
+    }
+    resp
 }
 
 pub fn blob_path(dir: &Path, r: &str) -> std::path::PathBuf {
@@ -430,12 +446,6 @@ fn file_uri(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn spans() {
-        let t = "a ![](blob:ab.png) b ![x](https://x) c";
-        assert_eq!(super::image_spans(t).iter().map(|&(s, e)| &t[s..e]).collect::<Vec<_>>(), vec!["![](blob:ab.png)"]);
-    }
-
-    #[test]
     fn file_uris() {
         assert_eq!(super::file_uri(r"C:\Users\x\blobs\4d\4d9e.png"), "file:///C:/Users/x/blobs/4d/4d9e.png");
         assert_eq!(super::file_uri("/home/x/blobs/ab/ab.png"), "file:///home/x/blobs/ab/ab.png");
@@ -445,7 +455,7 @@ mod tests {
 pub fn store_image(db: &Db, dir: &Path, img: &arboard::ImageData<'_>) -> Result<String, String> {
     let hash = blob::store_rgba(dir, img.width as u32, img.height as u32, &img.bytes).map_err(|e| format!("bild: {e}"))?;
     db.add_blob(&hash, "image/png").map_err(|e| format!("bild-db: {e}"))?;
-    Ok(format!("![](blob:{hash}.png)\n"))
+    Ok(format!("{hash}.png"))
 }
 
 fn set_cursor(ctx: &egui::Context, id: Id, char_idx: usize) {

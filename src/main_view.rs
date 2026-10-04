@@ -75,11 +75,10 @@ fn date_of(ms: i64) -> Option<NaiveDate> {
 }
 
 /// Clickable full-width row painted directly (time | glyph | name chip | preview).
-fn row(ui: &mut Ui, it: &Item, time: &str, selected: bool) -> egui::Response {
+fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool) -> egui::Response {
     let time_w = if time.len() > 5 { 92.0 } else { 52.0 };
-    let h = 30.0;
+    let h = 32.0;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), h), Sense::click());
-    let p = ui.painter_at(rect);
     let bg = if it.is_event {
         Some(theme::ACCENT_DIM)
     } else if selected || resp.hovered() {
@@ -88,8 +87,28 @@ fn row(ui: &mut Ui, it: &Item, time: &str, selected: bool) -> egui::Response {
         None
     };
     if let Some(bg) = bg {
-        p.rect_filled(rect, 5.0, bg);
+        ui.painter_at(rect).rect_filled(rect, 5.0, bg);
     }
+    // Thumbnail of the first image at the right end; text is clipped before it.
+    let mut text_right = rect.right() - 8.0;
+    if let Some(t) = &it.thumb {
+        let tr = egui::Rect::from_min_size(egui::pos2(rect.right() - 52.0, rect.top() + 3.0), egui::vec2(44.0, h - 6.0));
+        egui::Image::new(crate::doc::blob_uri(dir, t))
+            .fit_to_exact_size(tr.size())
+            .maintain_aspect_ratio(true)
+            .corner_radius(3)
+            .paint_at(ui, tr);
+        ui.painter().rect_stroke(tr, 3.0, egui::Stroke::new(1.0, theme::LINE), egui::StrokeKind::Outside);
+        text_right = tr.left() - 8.0;
+        if it.images > 1 {
+            let p = ui.painter();
+            let badge = format!("+{}", it.images - 1);
+            p.text(egui::pos2(text_right, rect.center().y), Align2::RIGHT_CENTER, badge, FontId::monospace(11.0), theme::WEAK);
+            text_right -= 28.0;
+        }
+    }
+    let clip = egui::Rect::from_min_max(rect.min, egui::pos2(text_right, rect.max.y));
+    let p = ui.painter_at(clip);
     let font = FontId::monospace(13.0);
     let small = FontId::monospace(12.0);
     let fg = if it.is_event { theme::ACCENT } else { theme::TEXT };
@@ -108,16 +127,13 @@ fn row(ui: &mut Ui, it: &Item, time: &str, selected: bool) -> egui::Response {
         p.galley(egui::pos2(x + 6.0, cy - g.size().y / 2.0), g, theme::TEXT);
         x += chip.width() + 8.0;
     }
-    let mut text = it.preview.clone();
-    match it.images {
-        0 => {}
-        1 => text.push_str("   +1 bild"),
-        n => text.push_str(&format!("   +{n} bilder")),
-    }
-    if text.is_empty() {
-        text = "(tomt)".into();
-    }
-    p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, text, font, fg);
+    let (text, col) = match (it.preview.is_empty(), it.images) {
+        (false, _) => (it.preview.clone(), fg),
+        (true, 0) => ("(tomt)".to_string(), theme::WEAK),
+        (true, 1) => ("Bild".to_string(), theme::WEAK),
+        (true, n) => (format!("{n} bilder"), theme::WEAK),
+    };
+    p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, text, font, col);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -476,6 +492,7 @@ impl App {
     }
 
     fn timeline_view(&mut self, ui: &mut Ui) {
+        let dir = self.dir.clone();
         let today = Local::now().date_naive();
         let day = self.main.day;
         let mut step = 0i64;
@@ -513,7 +530,7 @@ impl App {
         let mut open = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for it in &self.main.items {
-                if row(ui, it, &hhmm(it.time), false).clicked() {
+                if row(ui, &dir, it, &hhmm(it.time), false).clicked() {
                     open = Some(it.id);
                 }
             }
@@ -524,6 +541,7 @@ impl App {
     }
 
     fn named_view(&mut self, ui: &mut Ui) {
+        let dir = self.dir.clone();
         ui.label(RichText::new("Namngivna").family(theme::medium()).size(18.0));
         ui.add_space(8.0);
         if self.main.list.is_empty() {
@@ -538,7 +556,7 @@ impl App {
                         copy = Some(it.id);
                     }
                     let d = date_of(it.time).map(theme::day_short).unwrap_or_default();
-                    if row(ui, it, &d, false).clicked() {
+                    if row(ui, &dir, it, &d, false).clicked() {
                         open = Some(it.id);
                     }
                 });
@@ -555,6 +573,7 @@ impl App {
     }
 
     fn trash_view(&mut self, ui: &mut Ui) {
+        let dir = self.dir.clone();
         ui.label(RichText::new("Papperskorg").family(theme::medium()).size(18.0));
         ui.add_space(8.0);
         if self.main.list.is_empty() {
@@ -574,7 +593,7 @@ impl App {
                         purge = Some(it.id);
                     }
                     let d = date_of(it.time).map(theme::day_short).unwrap_or_default();
-                    row(ui, it, &d, false);
+                    row(ui, &dir, it, &d, false);
                 });
             }
         });
@@ -597,6 +616,7 @@ impl App {
     }
 
     fn search_view(&mut self, ui: &mut Ui) {
+        let dir = self.dir.clone();
         let ctx = ui.ctx().clone();
         let r = ui.add(
             egui::TextEdit::singleline(&mut self.main.query)
@@ -636,7 +656,7 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (i, it) in self.main.results.iter().enumerate() {
                 let d = date_of(it.time).map(theme::day_short).unwrap_or_default();
-                let resp = row(ui, it, &d, i == sel);
+                let resp = row(ui, &dir, it, &d, i == sel);
                 if i == sel && (up || down) {
                     resp.scroll_to_me(None);
                 }
@@ -703,14 +723,39 @@ impl App {
         if ed.preview {
             ed.preview_ui(ui, &mut self.md_cache, &dir);
         } else {
-            egui::Panel::bottom("ed_thumbs")
-                .frame(egui::Frame::new().inner_margin(Margin::symmetric(0, 4)))
-                .show_separator_line(false)
-                .show(ui, |ui| ed.thumbs(ui, &dir))
-                .inner
-                .map(|r| open_image = Some(r));
+            // Images sit above the text. An image-only entry shows its first image large,
+            // with the text field below acting as a caption.
+            let image_only = ed.body.trim().is_empty() && !ed.images.is_empty();
+            if image_only {
+                let h = (ui.available_height() * 0.62).max(160.0);
+                egui::Panel::top("ed_hero")
+                    .frame(egui::Frame::new().inner_margin(Margin::symmetric(0, 4)))
+                    .show_separator_line(false)
+                    .exact_size(h + 8.0)
+                    .show(ui, |ui| {
+                        let max = egui::vec2(ui.available_width() - 8.0, h - 8.0);
+                        ui.horizontal(|ui| {
+                            if ed.hero(ui, &dir, max) {
+                                open_image = ed.images.first().cloned();
+                            }
+                            for r in ed.images.iter().skip(1) {
+                                if crate::doc::image_tile(ui, &dir, r, crate::doc::THUMB).clicked() {
+                                    open_image = Some(r.clone());
+                                }
+                            }
+                        });
+                    });
+            } else if !ed.images.is_empty() {
+                egui::Panel::top("ed_gallery")
+                    .frame(egui::Frame::new().inner_margin(Margin::symmetric(0, 4)))
+                    .show_separator_line(false)
+                    .show(ui, |ui| ed.thumbs(ui, &dir, crate::doc::THUMB_LARGE))
+                    .inner
+                    .map(|r| open_image = Some(r));
+            }
+            let hint = if image_only { "Lägg till en bildtext…" } else { "Skriv… markdown fungerar, Ctrl+E förhandsvisar." };
             egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
-                ed.editor(ui, "Skriv… markdown fungerar, Ctrl+E förhandsvisar.");
+                ed.editor(ui, hint);
             });
         }
         if open_image.is_some() {

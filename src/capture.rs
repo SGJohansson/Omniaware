@@ -74,7 +74,7 @@ impl App {
 
         // ---- footer ----
         egui::Panel::bottom("cap_ftr").frame(bar(theme::BG, 12, 8)).show(ui, |ui| {
-            if let Some(r) = doc.thumbs(ui, &dir) {
+            if let Some(r) = doc.thumbs(ui, &dir, crate::doc::THUMB) {
                 open_image = Some(r);
             }
             ui.horizontal(|ui| {

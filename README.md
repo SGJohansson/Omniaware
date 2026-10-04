@@ -11,7 +11,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 - **Silent capture** — press `Ctrl+C` twice in quick succession and the clipboard (text or image) is saved straight to today's journal. The tray icon briefly turns green; nothing else interrupts you.
 - **One key for everything else** — `Ctrl+Alt+O` opens a small capture window pre-filled with the clipboard. Press it again and the same note expands into the main window: a day-by-day timeline, a month calendar marking days with content, named entries and a recycle bin. Press it a third time to put everything away.
 - **Full-text search** — `Ctrl+K` searches everything. `Shift+Enter` pastes the result straight into the window you came from.
-- **Markdown** — entries are plain Markdown with a rendered preview (`Ctrl+E`), including images and task lists.
+- **Markdown and images** — entries are plain Markdown text with a rendered preview (`Ctrl+E`). Pasted images are kept as attachments shown above the text; an image-only entry is displayed full size with the text as its caption. Click any image to enlarge, open or copy it.
 - **Named snippets** — give an entry a name (`Ctrl+S`) and it becomes a reusable snippet, much like an AutoHotkey text store.
 - **Crash-safe by design** — see [Data and durability](#data-and-durability).
 

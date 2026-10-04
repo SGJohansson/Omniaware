@@ -77,6 +77,7 @@ pub struct Entry {
     pub body: String,
     pub created: i64,
     pub starts: Option<i64>,
+    pub images: Vec<String>,
 }
 
 /// Row in timeline / lists.
@@ -86,6 +87,8 @@ pub struct Item {
     pub name: Option<String>,
     pub preview: String,
     pub images: usize,
+    /// First attached image ref, for the row thumbnail.
+    pub thumb: Option<String>,
     /// Display time: `starts` for events in range, else `created` (or `updated`/`deleted` for lists).
     pub time: i64,
     pub is_event: bool,
@@ -131,16 +134,63 @@ pub fn blob_refs(body: &str) -> Vec<String> {
         .collect()
 }
 
+/// Columns 5 and 6 of every list query: attachment count and first attachment.
+const ATT_COLS: &str = "(SELECT count(*) FROM attachment a WHERE a.entry_id = e.id),
+     (SELECT a.blob FROM attachment a WHERE a.entry_id = e.id ORDER BY a.pos LIMIT 1)";
+
 fn item_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item> {
     let body: String = r.get(2)?;
     Ok(Item {
         id: r.get(0)?,
         name: r.get(1)?,
         preview: preview_of(&body),
-        images: blob_refs(&body).len(),
+        images: r.get::<_, i64>(5)? as usize,
+        thumb: r.get(6)?,
         time: r.get(3)?,
         is_event: r.get::<_, i64>(4)? != 0,
     })
+}
+
+/// Schema v2: images become attachments instead of `![](blob:…)` text in the body.
+const SCHEMA_V2: &str = r#"
+CREATE TABLE attachment(
+  entry_id INTEGER NOT NULL REFERENCES entry(id) ON DELETE CASCADE,
+  blob     TEXT NOT NULL,
+  pos      INTEGER NOT NULL,
+  PRIMARY KEY (entry_id, blob)
+);
+"#;
+
+/// Removes `![…](blob:…)` refs from a body and tidies the blank lines they leave.
+fn strip_blob_refs(body: &str) -> String {
+    let mut out = String::new();
+    let mut rest = body;
+    while let Some(i) = rest.find("![") {
+        let tail = &rest[i..];
+        match tail.find(')') {
+            Some(j) if tail[..j].contains("](blob:") => {
+                out.push_str(&rest[..i]);
+                rest = &tail[j + 1..];
+            }
+            _ => {
+                out.push_str(&rest[..i + 2]);
+                rest = &rest[i + 2..];
+            }
+        }
+    }
+    out.push_str(rest);
+    let lines: Vec<&str> = out.lines().map(str::trim_end).collect();
+    let mut tidy: Vec<&str> = Vec::new();
+    for l in lines {
+        if l.is_empty() && tidy.last().is_none_or(|p: &&str| p.is_empty()) {
+            continue;
+        }
+        tidy.push(l);
+    }
+    while tidy.last().is_some_and(|l| l.is_empty()) {
+        tidy.pop();
+    }
+    tidy.join("\n")
 }
 
 /// Turns user input into an FTS5 prefix query: every token must match (`"tok"*`).
@@ -172,6 +222,25 @@ impl Db {
             let tx = self.conn.unchecked_transaction()?;
             tx.execute_batch(SCHEMA_V1)?;
             tx.execute_batch("PRAGMA user_version=1")?;
+            tx.commit()?;
+        }
+        if v < 2 {
+            let tx = self.conn.unchecked_transaction()?;
+            tx.execute_batch(SCHEMA_V2)?;
+            let rows: Vec<(i64, String)> = {
+                let mut st = tx.prepare("SELECT id, body FROM entry WHERE body LIKE '%](blob:%'")?;
+                st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?
+            };
+            for (id, body) in rows {
+                for (pos, b) in blob_refs(&body).into_iter().enumerate() {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO attachment(entry_id, blob, pos) VALUES (?1, ?2, ?3)",
+                        params![id, b, pos as i64],
+                    )?;
+                }
+                tx.execute("UPDATE entry SET body=?1 WHERE id=?2", params![strip_blob_refs(&body), id])?;
+            }
+            tx.execute_batch("PRAGMA user_version=2")?;
             tx.commit()?;
         }
         Ok(())
@@ -252,7 +321,7 @@ impl Db {
     }
 
     pub fn get(&self, id: i64) -> Result<Entry> {
-        self.conn.query_row(
+        let mut e = self.conn.query_row(
             "SELECT id, name, body, created, starts FROM entry WHERE id=?1",
             [id],
             |r| {
@@ -262,16 +331,48 @@ impl Db {
                     body: r.get(2)?,
                     created: r.get(3)?,
                     starts: r.get(4)?,
+                    images: Vec::new(),
                 })
             },
-        )
+        )?;
+        e.images = self.attachments(id)?;
+        Ok(e)
     }
 
-    /// Body of the most recently created live entry (to avoid re-capturing the same clipboard).
-    pub fn latest_body(&self) -> Result<Option<String>> {
-        self.conn
-            .query_row("SELECT body FROM entry WHERE deleted IS NULL ORDER BY created DESC LIMIT 1", [], |r| r.get(0))
-            .optional()
+    pub fn attachments(&self, id: i64) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare_cached("SELECT blob FROM attachment WHERE entry_id=?1 ORDER BY pos")?;
+        st.query_map([id], |r| r.get(0))?.collect()
+    }
+
+    pub fn add_attachment(&self, id: i64, blob: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO attachment(entry_id, blob, pos)
+             VALUES (?1, ?2, (SELECT coalesce(max(pos), -1) + 1 FROM attachment WHERE entry_id=?1))",
+            params![id, blob],
+        )?;
+        self.conn.execute("UPDATE entry SET updated=?1 WHERE id=?2", params![now_ms(), id])?;
+        Ok(())
+    }
+
+    pub fn remove_attachment(&self, id: i64, blob: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM attachment WHERE entry_id=?1 AND blob=?2", params![id, blob])?;
+        Ok(())
+    }
+
+    /// Body and images of the most recently created live entry (to avoid re-capturing the same clipboard).
+    pub fn latest(&self) -> Result<Option<(String, Vec<String>)>> {
+        let row: Option<(i64, String)> = self
+            .conn
+            .query_row(
+                "SELECT id, body FROM entry WHERE deleted IS NULL ORDER BY created DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        match row {
+            Some((id, body)) => Ok(Some((body, self.attachments(id)?))),
+            None => Ok(None),
+        }
     }
 
     pub fn clear_name(&self, id: i64) -> Result<()> {
@@ -286,15 +387,15 @@ impl Db {
 
     /// Live entries created in [from, to) or starting in [from, to), oldest first.
     pub fn day_items(&self, from: i64, to: i64) -> Result<Vec<Item>> {
-        let mut st = self.conn.prepare_cached(
-            "SELECT id, name, body,
-                    CASE WHEN starts >= ?1 AND starts < ?2 THEN starts ELSE created END AS t,
-                    (starts >= ?1 AND starts < ?2) IS 1
-             FROM entry
-             WHERE deleted IS NULL
-               AND ((created >= ?1 AND created < ?2) OR (starts >= ?1 AND starts < ?2))
-             ORDER BY t",
-        )?;
+        let mut st = self.conn.prepare_cached(&format!(
+            "SELECT e.id, e.name, e.body,
+                    CASE WHEN e.starts >= ?1 AND e.starts < ?2 THEN e.starts ELSE e.created END AS t,
+                    (e.starts >= ?1 AND e.starts < ?2) IS 1, {ATT_COLS}
+             FROM entry e
+             WHERE e.deleted IS NULL
+               AND ((e.created >= ?1 AND e.created < ?2) OR (e.starts >= ?1 AND e.starts < ?2))
+             ORDER BY t"
+        ))?;
         st.query_map([from, to], item_row)?.collect()
     }
 
@@ -309,35 +410,65 @@ impl Db {
     }
 
     pub fn named(&self) -> Result<Vec<Item>> {
-        let mut st = self.conn.prepare_cached(
-            "SELECT id, name, body, updated, 0 FROM entry
-             WHERE deleted IS NULL AND name IS NOT NULL ORDER BY name COLLATE NOCASE",
-        )?;
+        let mut st = self.conn.prepare_cached(&format!(
+            "SELECT e.id, e.name, e.body, e.updated, 0, {ATT_COLS} FROM entry e
+             WHERE e.deleted IS NULL AND e.name IS NOT NULL ORDER BY e.name COLLATE NOCASE"
+        ))?;
         st.query_map([], item_row)?.collect()
     }
 
     pub fn trash(&self) -> Result<Vec<Item>> {
-        let mut st = self.conn.prepare_cached(
-            "SELECT id, name, body, deleted, 0 FROM entry WHERE deleted IS NOT NULL ORDER BY deleted DESC",
-        )?;
+        let mut st = self.conn.prepare_cached(&format!(
+            "SELECT e.id, e.name, e.body, e.deleted, 0, {ATT_COLS} FROM entry e
+             WHERE e.deleted IS NOT NULL ORDER BY e.deleted DESC"
+        ))?;
         st.query_map([], item_row)?.collect()
     }
 
     /// Full-text search (prefix match on every word), best first.
     pub fn search(&self, q: &str) -> Result<Vec<Item>> {
         let Some(fq) = fts_query(q) else { return Ok(Vec::new()) };
-        let mut st = self.conn.prepare_cached(
-            "SELECT e.id, e.name, e.body, e.created, 0
+        let mut st = self.conn.prepare_cached(&format!(
+            "SELECT e.id, e.name, e.body, e.created, 0, {ATT_COLS}
              FROM entry_fts f JOIN entry e ON e.id = f.rowid
              WHERE entry_fts MATCH ?1 AND e.deleted IS NULL
-             ORDER BY rank LIMIT 60",
-        )?;
+             ORDER BY rank LIMIT 60"
+        ))?;
         st.query_map([fq], item_row)?.collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn migrates_inline_images_to_attachments() {
+        let p = std::env::temp_dir().join(format!("omni-mig-{}.db", now_ms()));
+        {
+            let c = Connection::open(&p).unwrap();
+            c.execute_batch(SCHEMA_V1).unwrap();
+            c.execute_batch("PRAGMA user_version=1").unwrap();
+            c.execute(
+                "INSERT INTO entry(body, created, updated) VALUES ('hej\n![](blob:aa11.png)\n\nslut ![x](https://x)', 1, 1)",
+                [],
+            )
+            .unwrap();
+            c.execute("INSERT INTO entry(body, created, updated) VALUES ('![](blob:bb22.png)\n', 2, 2)", []).unwrap();
+        }
+        let db = Db::open(&p).unwrap();
+        let a = db.get(1).unwrap();
+        assert_eq!(a.body, "hej\n\nslut ![x](https://x)");
+        assert_eq!(a.images, vec!["aa11.png"]);
+        let b = db.get(2).unwrap();
+        assert_eq!((b.body.as_str(), b.images.clone()), ("", vec!["bb22.png".to_string()]));
+        let items = db.day_items(0, i64::MAX).unwrap();
+        assert_eq!(items[1].thumb.as_deref(), Some("bb22.png"));
+        db.add_attachment(2, "cc33.png").unwrap();
+        db.add_attachment(2, "cc33.png").unwrap();
+        assert_eq!(db.attachments(2).unwrap(), vec!["bb22.png", "cc33.png"]);
+        db.remove_attachment(2, "bb22.png").unwrap();
+        assert_eq!(db.latest().unwrap().unwrap().1, vec!["cc33.png"]);
+    }
+
     #[test]
     fn previews() {
         assert_eq!(preview_of("\n![](blob:ab.png)\n  hej  \nmer"), "hej");

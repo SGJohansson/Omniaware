@@ -218,30 +218,33 @@ impl App {
     /// New capture doc, pre-filled from the clipboard and persisted immediately.
     fn new_capture_doc(&self) -> Doc {
         let mut d = Doc::new(&format!("capture-{}", crate::db::now_ms()));
-        match arboard::Clipboard::new() {
-            Ok(mut cb) => {
-                if let Ok(t) = cb.get_text()
-                    && !t.trim().is_empty()
-                {
-                    d.body = t.replace("\r\n", "\n");
-                } else if let Ok(img) = cb.get_image() {
-                    match doc::store_image(&self.db, &self.dir, &img) {
-                        Ok(md) => d.body = md,
-                        Err(e) => d.fail(e),
-                    }
-                }
-            }
-            Err(e) => log::error(format!("urklipp: {e}")),
-        }
+        let clip = self.read_clipboard();
         // Pressing the shortcut again with an unchanged clipboard should not create a duplicate.
-        if !d.body.is_empty() && self.db.latest_body().ok().flatten().as_deref() == Some(d.body.as_str()) {
-            d.body.clear();
-        }
-        if !d.body.is_empty() {
-            d.mark_dirty();
-            d.flush(&self.db);
+        let latest = self.db.latest().ok().flatten();
+        match clip {
+            Some(Clip::Text(t)) if latest.as_ref().is_none_or(|(b, _)| *b != t) => {
+                d.body = t;
+                d.mark_dirty();
+                d.flush(&self.db);
+            }
+            Some(Clip::Image(r)) if latest.as_ref().is_none_or(|(b, imgs)| !(b.is_empty() && imgs == &[r.clone()])) => {
+                d.attach(&self.db, r);
+            }
+            _ => {}
         }
         d
+    }
+
+    /// Clipboard as text, or as an image stored in the blob store.
+    fn read_clipboard(&self) -> Option<Clip> {
+        let mut cb = arboard::Clipboard::new().map_err(|e| log::error(format!("urklipp: {e}"))).ok()?;
+        if let Ok(t) = cb.get_text()
+            && !t.trim().is_empty()
+        {
+            return Some(Clip::Text(t.replace("\r\n", "\n")));
+        }
+        let img = cb.get_image().ok()?;
+        doc::store_image(&self.db, &self.dir, &img).map_err(log::error).ok().map(Clip::Image)
     }
 
     /// Esc (save) or Shift+Esc (discard) in the capture popup.
@@ -317,6 +320,7 @@ impl App {
         let path = doc::blob_path(&self.dir, &r);
         let max = ctx.content_rect().size() * egui::vec2(0.85, 0.75);
         let mut close = false;
+        let mut remove = false;
         let resp = egui::Modal::new(egui::Id::new("lightbox")).show(ctx, |ui| {
             ui.add(egui::Image::new(uri).fit_to_exact_size(max).maintain_aspect_ratio(true).corner_radius(4));
             ui.add_space(6.0);
@@ -329,11 +333,24 @@ impl App {
                         log::error(format!("kopiera bild: {e}"));
                     }
                 }
+                if ui.button(egui::RichText::new("Ta bort från inlägget").color(theme::ERR)).clicked() {
+                    remove = true;
+                }
                 close = ui.button("Stäng").clicked();
                 ui.label(egui::RichText::new("Esc stänger").color(theme::WEAK).size(12.0));
             });
         });
-        if close || resp.should_close() {
+        if remove {
+            let doc = match self.mode {
+                Mode::Capture => self.capture.as_mut(),
+                _ => self.main.editor.as_mut(),
+            };
+            if let Some(d) = doc {
+                d.detach(&self.db, &r);
+            }
+            self.main.stale = true;
+        }
+        if close || remove || resp.should_close() {
             self.lightbox = None;
         }
     }
@@ -343,24 +360,20 @@ impl App {
         if self.mode != Mode::Hidden && win::foreground() == self.hwnd {
             return; // copying inside Omniaware itself
         }
-        let body = match arboard::Clipboard::new() {
-            Ok(mut cb) => match cb.get_text() {
-                Ok(t) if !t.trim().is_empty() => t.replace("\r\n", "\n"),
-                _ => match cb.get_image() {
-                    Ok(img) => match doc::store_image(&self.db, &self.dir, &img) {
-                        Ok(md) => md,
-                        Err(e) => return log::error(e),
-                    },
-                    Err(_) => return,
-                },
-            },
-            Err(e) => return log::error(format!("urklipp: {e}")),
+        let Some(clip) = self.read_clipboard() else { return };
+        let key = match &clip {
+            Clip::Text(t) => format!("t:{t}"),
+            Clip::Image(r) => format!("i:{r}"),
         };
-        if self.last_stash.as_deref() != Some(body.as_str()) {
-            match self.db.insert(&body).and_then(|id| self.db.add_revision(id, &body)) {
+        if self.last_stash.as_deref() != Some(key.as_str()) {
+            let res = match &clip {
+                Clip::Text(t) => self.db.insert(t).and_then(|id| self.db.add_revision(id, t)),
+                Clip::Image(r) => self.db.insert("").and_then(|id| self.db.add_attachment(id, r)),
+            };
+            match res {
                 Ok(()) => {
                     self.main.stale = true;
-                    self.last_stash = Some(body);
+                    self.last_stash = Some(key);
                 }
                 Err(e) => return log::error(format!("tyst fångst: {e}")),
             }
@@ -391,7 +404,8 @@ impl App {
         if let Some(d) = doc
             && d.has_focus(ctx)
         {
-            d.paste_image(ctx, &self.db, &self.dir);
+            d.paste_image(&self.db, &self.dir);
+            self.main.stale = true;
         }
     }
 }
@@ -479,4 +493,10 @@ fn copy_image(path: &std::path::Path) -> Result<(), String> {
     let (w, h) = img.dimensions();
     let data = arboard::ImageData { width: w as usize, height: h as usize, bytes: img.into_raw().into() };
     arboard::Clipboard::new().and_then(|mut c| c.set_image(data)).map_err(|e| e.to_string())
+}
+
+enum Clip {
+    Text(String),
+    /// Blob ref of an image already written to the blob store.
+    Image(String),
 }
