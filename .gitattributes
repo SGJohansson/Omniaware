@@ -1,0 +1,5 @@
+# Normalise text to LF in the repository and the working tree (silences CRLF warnings on Windows).
+* text=auto eol=lf
+*.ttf binary
+*.png binary
+*.ico binary

@@ -2,7 +2,7 @@ use tray_icon::menu::{Menu, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 pub struct Tray {
-    _icon: TrayIcon,
+    icon: TrayIcon,
     pub capture_id: MenuId,
     pub main_id: MenuId,
     pub quit_id: MenuId,
@@ -11,25 +11,37 @@ pub struct Tray {
 pub fn build() -> Result<Tray, Box<dyn std::error::Error>> {
     let menu = Menu::new();
     let capture = MenuItem::new("Snabbanteckning", true, None);
-    let main = MenuItem::new("Öppna Omni", true, None);
+    let main = MenuItem::new("Öppna Omniaware", true, None);
     let quit = MenuItem::new("Avsluta", true, None);
     menu.append_items(&[&capture, &main, &PredefinedMenuItem::separator(), &quit])?;
     let icon = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false)
         .with_tooltip(crate::app::TITLE)
-        .with_icon(make_icon()?)
+        .with_icon(make_icon(TEAL)?)
         .build()?;
     Ok(Tray {
-        _icon: icon,
+        icon,
         capture_id: capture.id().clone(),
         main_id: main.id().clone(),
         quit_id: quit.id().clone(),
     })
 }
 
-/// 32×32 procedural icon: rounded teal square with a white "+".
-fn make_icon() -> Result<Icon, tray_icon::BadIcon> {
+const TEAL: [u8; 3] = [38, 166, 154];
+const GREEN: [u8; 3] = [110, 196, 132];
+
+impl Tray {
+    /// Green icon while `on` (silent-capture feedback).
+    pub fn flash(&self, on: bool) {
+        if let Ok(i) = make_icon(if on { GREEN } else { TEAL }) {
+            let _ = self.icon.set_icon(Some(i));
+        }
+    }
+}
+
+/// 32×32 procedural icon: rounded square in `rgb` with a white "+".
+fn make_icon(rgb: [u8; 3]) -> Result<Icon, tray_icon::BadIcon> {
     const S: i32 = 32;
     let mut px = Vec::with_capacity((S * S * 4) as usize);
     for y in 0..S {
@@ -43,7 +55,7 @@ fn make_icon() -> Result<Icon, tray_icon::BadIcon> {
             } else if plus {
                 [255, 255, 255, 255]
             } else {
-                [38, 166, 154, 255]
+                [rgb[0], rgb[1], rgb[2], 255]
             };
             px.extend_from_slice(&c);
         }

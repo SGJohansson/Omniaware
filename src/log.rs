@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 static PATH: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn init(dir: &Path) {
-    let _ = PATH.set(dir.join("omniware.log"));
+    let _ = PATH.set(dir.join("omniaware.log"));
 }
 
 pub fn error(msg: impl std::fmt::Display) {

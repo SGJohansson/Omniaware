@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use tray_icon::menu::MenuEvent;
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
 
-pub const TITLE: &str = "QuickCreateOmniware";
+pub const TITLE: &str = "Omniaware";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -27,6 +27,9 @@ pub enum Mode {
 #[derive(Default)]
 struct Signals {
     capture: AtomicBool,
+    /// Ctrl+C+C: save clipboard silently.
+    stash: AtomicBool,
+    unflash: AtomicBool,
     main: AtomicBool,
     quit: AtomicBool,
 }
@@ -43,7 +46,7 @@ pub struct App {
     sig: Arc<Signals>,
     hwnd: isize,
     _hotkeys: Option<GlobalHotKeyManager>,
-    _tray: Option<tray::Tray>,
+    tray: Option<tray::Tray>,
 
     pub(crate) mode: Mode,
     quitting: bool,
@@ -53,6 +56,7 @@ pub struct App {
     prev_fg: isize,
     main_rect: Option<win::Rect>,
     v_was_down: bool,
+    last_stash: Option<String>,
 
     pub(crate) capture: Option<Doc>,
     pub(crate) capture_naming: bool,
@@ -67,8 +71,8 @@ impl App {
         egui_extras::install_image_loaders(&ctx);
 
         let sig = Arc::new(Signals::default());
-        // Test hook: open a mode on startup (OMNIWARE_OPEN=capture|main).
-        match std::env::var("OMNIWARE_OPEN").as_deref() {
+        // Test hook: open a mode on startup (OMNIAWARE_OPEN=capture|main).
+        match std::env::var("OMNIAWARE_OPEN").or_else(|_| std::env::var("OMNIWARE_OPEN")).as_deref() {
             Ok("capture") => sig.capture.store(true, SeqCst),
             Ok("main") => sig.main.store(true, SeqCst),
             _ => {}
@@ -105,6 +109,11 @@ impl App {
                     poke(&s, &c, *flag);
                 }
             }));
+        }
+
+        {
+            let (s, c) = (sig.clone(), ctx.clone());
+            win::on_double_copy(move || poke(&s, &c, |s| &s.stash));
         }
 
         let tray = match if cfg!(windows) { tray::build() } else { Err("tray: bara Windows".into()) } {
@@ -146,13 +155,14 @@ impl App {
             sig,
             hwnd: win::hwnd_of(cc),
             _hotkeys: hotkeys,
-            _tray: tray,
+            tray: tray,
             mode: Mode::Hidden,
             quitting: false,
             return_to_main: false,
             prev_fg: 0,
             main_rect: None,
             v_was_down: false,
+            last_stash: None,
             capture: None,
             capture_naming: false,
             main: MainState::new(),
@@ -274,6 +284,43 @@ impl App {
         win::paste_to(self.prev_fg, text);
     }
 
+    /// Ctrl+C+C: store the clipboard as a journal entry without showing anything; tray flashes green.
+    fn stash(&mut self, ctx: &egui::Context) {
+        if self.mode != Mode::Hidden && win::foreground() == self.hwnd {
+            return; // copying inside Omniaware itself
+        }
+        let body = match arboard::Clipboard::new() {
+            Ok(mut cb) => match cb.get_text() {
+                Ok(t) if !t.trim().is_empty() => t.replace("\r\n", "\n"),
+                _ => match cb.get_image() {
+                    Ok(img) => match doc::store_image(&self.db, &self.dir, &img) {
+                        Ok(md) => md,
+                        Err(e) => return log::error(e),
+                    },
+                    Err(_) => return,
+                },
+            },
+            Err(e) => return log::error(format!("urklipp: {e}")),
+        };
+        if self.last_stash.as_deref() != Some(body.as_str()) {
+            match self.db.insert(&body).and_then(|id| self.db.add_revision(id, &body)) {
+                Ok(()) => {
+                    self.main.stale = true;
+                    self.last_stash = Some(body);
+                }
+                Err(e) => return log::error(format!("tyst fångst: {e}")),
+            }
+        }
+        if let Some(t) = &self.tray {
+            t.flash(true);
+            let (s, c) = (self.sig.clone(), ctx.clone());
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(900));
+                poke(&s, &c, |s| &s.unflash);
+            });
+        }
+    }
+
     /// Ctrl+V with an image-only clipboard into whichever editor has focus.
     fn poll_image_paste(&mut self, ctx: &egui::Context) {
         let v = win::key_down(win::VK_V);
@@ -308,6 +355,14 @@ impl eframe::App for App {
             self.quitting = true;
             ctx.send_viewport_cmd(ViewportCommand::Close);
             return;
+        }
+        if self.sig.stash.swap(false, SeqCst) {
+            self.stash(ctx);
+        }
+        if self.sig.unflash.swap(false, SeqCst)
+            && let Some(t) = &self.tray
+        {
+            t.flash(false);
         }
         if self.sig.capture.swap(false, SeqCst) {
             self.open_capture(ctx);

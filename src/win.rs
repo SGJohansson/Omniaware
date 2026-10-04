@@ -42,7 +42,7 @@ mod imp {
 
     pub fn single_instance() -> Option<Instance> {
         unsafe {
-            let h = CreateMutexW(None, true, w!("Local\\QuickCreateOmniware.SingleInstance")).ok()?;
+            let h = CreateMutexW(None, true, w!("Local\\Omniaware.SingleInstance")).ok()?;
             if GetLastError() == ERROR_ALREADY_EXISTS {
                 let _ = CloseHandle(h);
                 return None;
@@ -153,6 +153,96 @@ mod imp {
             }
         });
     }
+
+    // ---------- Ctrl+C+C: two Ctrl-held clipboard updates in quick succession ----------
+
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::DataExchange::AddClipboardFormatListener;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, HWND_MESSAGE, MSG, RegisterClassW,
+        TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLIPBOARDUPDATE, WNDCLASSW,
+    };
+
+    /// Updates closer than this come from a single copy (apps often write several formats).
+    const SAME_COPY: Duration = Duration::from_millis(40);
+    /// Max gap between the two C presses.
+    const DOUBLE: Duration = Duration::from_millis(450);
+
+    static ON_DOUBLE: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+
+    unsafe extern "system" fn clip_proc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+        if msg != WM_CLIPBOARDUPDATE {
+            return unsafe { DefWindowProcW(h, msg, w, l) };
+        }
+        let now = Instant::now();
+        let ctrl = key_down(VK_CONTROL.0 as i32);
+        let fire = {
+            let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+            match (*last, ctrl) {
+                (_, false) => {
+                    *last = None;
+                    false
+                }
+                (Some(t), true) if now.duration_since(t) < SAME_COPY => false,
+                (Some(t), true) if now.duration_since(t) <= DOUBLE => {
+                    *last = None;
+                    true
+                }
+                (_, true) => {
+                    *last = Some(now);
+                    false
+                }
+            }
+        };
+        if fire && let Some(f) = ON_DOUBLE.get() {
+            f();
+        }
+        LRESULT(0)
+    }
+
+    /// Calls `f` (on a listener thread) when the user copies twice quickly with Ctrl held.
+    /// Uses the clipboard-change notification, not a keyboard hook.
+    pub fn on_double_copy(f: impl Fn() + Send + Sync + 'static) {
+        if ON_DOUBLE.set(Box::new(f)).is_err() {
+            return;
+        }
+        std::thread::spawn(|| unsafe {
+            let Ok(module) = GetModuleHandleW(None) else { return };
+            let inst: HINSTANCE = module.into();
+            let class = w!("OmniawareClipboardListener");
+            let wc = WNDCLASSW { lpfnWndProc: Some(clip_proc), hInstance: inst, lpszClassName: class, ..Default::default() };
+            RegisterClassW(&wc);
+            let hwnd = match CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                class,
+                w!(""),
+                WINDOW_STYLE(0),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                Some(inst),
+                None,
+            ) {
+                Ok(h) => h,
+                Err(e) => return crate::log::error(format!("urklippslyssnare: {e}")),
+            };
+            if let Err(e) = AddClipboardFormatListener(hwnd) {
+                return crate::log::error(format!("urklippslyssnare: {e}"));
+            }
+            let mut msg = MSG::default();
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        });
+    }
 }
 
 #[cfg(not(windows))]
@@ -173,6 +263,7 @@ mod imp {
     }
     pub fn place(_h: isize, _rect: Option<Rect>, _size: (f32, f32), _topmost: bool, _taskbar: bool) {}
     pub fn paste_to(_target: isize, _text: String) {}
+    pub fn on_double_copy(_f: impl Fn() + Send + Sync + 'static) {}
 }
 
 pub use imp::*;

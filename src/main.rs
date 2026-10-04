@@ -26,7 +26,10 @@ fn main() {
     log::init(&dir);
     let cfg = config::load(&dir);
 
-    let db = match db::Db::open(&dir.join("omniware.db")) {
+    // Pre-rename installs keep their database file as-is (renaming a live WAL database is not worth the risk).
+    let legacy = dir.join("omniware.db");
+    let db_path = if legacy.exists() { legacy } else { dir.join("omniaware.db") };
+    let db = match db::Db::open(&db_path) {
         Ok(db) => db,
         Err(e) => {
             log::error(format!("databas: {e}"));

@@ -283,7 +283,7 @@ impl App {
             .show(ui, |ui| {
                 let r = ui
                     .horizontal(|ui| {
-                        ui.label(RichText::new("Omni").family(theme::medium()).color(theme::ACCENT));
+                        ui.label(RichText::new("Omniaware").family(theme::medium()).color(theme::ACCENT));
                         ui.label(RichText::new(format!("/  {section}")).color(theme::WEAK));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             close = ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Stäng (Esc)").clicked();
@@ -446,7 +446,6 @@ impl App {
                                 hint(ui, &["←", "→"], "dag");
                                 hint(ui, &["T"], "idag");
                                 hint(ui, &["Ctrl", "N"], "nytt");
-                                hint(ui, &["Ctrl", "K"], "sök");
                                 hint(ui, &["Esc"], "stäng");
                             }
                             _ => {
@@ -466,9 +465,14 @@ impl App {
                             ui.ctx().send_viewport_cmd(ViewportCommand::BeginResize(egui::ResizeDirection::SouthEast));
                         }
                         ui.add_space(8.0);
-                        ui.label(RichText::new("snabbanteckning").color(theme::WEAK).size(12.0));
+                        ui.label(RichText::new("snabbruta").color(theme::WEAK).size(12.0));
                         ui.spacing_mut().item_spacing.x = 3.0;
                         for k in cap.iter().rev() {
+                            theme::keycap(ui, k);
+                        }
+                        ui.add_space(12.0);
+                        ui.label(RichText::new("tyst fångst").color(theme::WEAK).size(12.0));
+                        for k in ["C", "C", "Ctrl"] {
                             theme::keycap(ui, k);
                         }
                     });
@@ -504,7 +508,10 @@ impl App {
         }
         if self.main.items.is_empty() {
             let caps = theme::hotkey_caps(&self.cfg.hotkeys.capture).join("+");
-            empty_note(ui, &format!("Inget här än. {caps} fångar urklipp, Ctrl+N skriver nytt."));
+            empty_note(
+                ui,
+                &format!("Inget här än. Ctrl+C+C sparar urklippet direkt, {caps} öppnar snabbrutan, Ctrl+N skriver nytt."),
+            );
             return;
         }
         let mut open = None;
