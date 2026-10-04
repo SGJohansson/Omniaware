@@ -1,0 +1,42 @@
+[package]
+name = "omniware"
+version = "0.1.0"
+edition = "2024"
+description = "QuickCreateOmniware – hotkey-driven capture/journal"
+
+[dependencies]
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wgpu"] }
+egui = "0.36"
+egui_extras = { version = "0.36", features = ["image", "file"] }
+egui_commonmark = "0.25"
+rusqlite = { version = "0.40", features = ["bundled"] }
+global-hotkey = "0.8"
+tray-icon = "0.26"
+arboard = "3.6"
+image = { version = "0.25", default-features = false, features = ["png"] }
+blake3 = "1.8"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+raw-window-handle = "0.6"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_Threading",
+  "Win32_Security",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_HiDpi",
+  "Win32_Graphics_Gdi",
+] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+codegen-units = 1
+
+# Only so the crate type-checks/tests on Linux CI; the app targets Windows.
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "0.36", default-features = false, features = ["x11"] }
