@@ -227,8 +227,9 @@ impl App {
 
         // ---- global keys ----
         let nothing_focused = ctx.memory(|m| m.focused().is_none());
-        if self.lightbox.is_some() {
-            // the lightbox owns Esc
+        let esc_used = self.selection_keys(&ctx);
+        if self.lightbox.is_some() || esc_used {
+            // the lightbox / image selection owns Esc
         } else if ctx.input(|i| i.key_pressed(Key::Escape)) {
             if self.main.editor.is_some() {
                 self.close_editor();
@@ -683,7 +684,7 @@ impl App {
         let mut back = false;
         let mut discard = false;
         let mut commit = false;
-        let mut open_image = None;
+        let mut img_act = None;
         let Some(ed) = self.main.editor.as_mut() else { return };
         ui.horizontal(|ui| {
             back = ui.button("← Tillbaka").clicked();
@@ -733,17 +734,8 @@ impl App {
                     .show_separator_line(false)
                     .exact_size(h + 8.0)
                     .show(ui, |ui| {
-                        let max = egui::vec2(ui.available_width() - 8.0, h - 8.0);
-                        ui.horizontal(|ui| {
-                            if ed.hero(ui, &dir, max) {
-                                open_image = ed.images.first().cloned();
-                            }
-                            for r in ed.images.iter().skip(1) {
-                                if crate::doc::image_tile(ui, &dir, r, crate::doc::THUMB).clicked() {
-                                    open_image = Some(r.clone());
-                                }
-                            }
-                        });
+                        let max = egui::vec2(ui.available_width() * 0.7, h - 10.0);
+                        img_act = ed.hero(ui, &dir, max);
                     });
             } else if !ed.images.is_empty() {
                 egui::Panel::top("ed_gallery")
@@ -751,15 +743,15 @@ impl App {
                     .show_separator_line(false)
                     .show(ui, |ui| ed.thumbs(ui, &dir, crate::doc::THUMB_LARGE))
                     .inner
-                    .map(|r| open_image = Some(r));
+                    .map(|a| img_act = Some(a));
             }
             let hint = if image_only { "Lägg till en bildtext…" } else { "Skriv… markdown fungerar, Ctrl+E förhandsvisar." };
             egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
                 ed.editor(ui, hint);
             });
         }
-        if open_image.is_some() {
-            self.lightbox = open_image;
+        if let Some(a) = img_act {
+            self.image_action(a);
             return;
         }
         if commit {

@@ -21,6 +21,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 raw-window-handle = "0.6"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
+rfd = { version = "0.17", default-features = false, features = ["gtk3"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

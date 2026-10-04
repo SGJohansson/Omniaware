@@ -73,6 +73,10 @@ impl App {
         egui_extras::install_image_loaders(&ctx);
 
         let sig = Arc::new(Signals::default());
+        {
+            let d = dir.clone();
+            std::thread::spawn(move || crate::blob::repair_transparent(&d));
+        }
         // Test hook: open a mode on startup (OMNIAWARE_OPEN=capture|main).
         match std::env::var("OMNIAWARE_OPEN").or_else(|_| std::env::var("OMNIWARE_OPEN")).as_deref() {
             Ok("capture") => sig.capture.store(true, SeqCst),
@@ -313,46 +317,132 @@ impl App {
         win::paste_to(self.prev_fg, text);
     }
 
-    /// Enlarged image with open/copy actions. Esc or a click outside closes it.
+    /// Enlarged image with a compact toolbar; right-click on the image gives the same menu.
     fn lightbox_ui(&mut self, ctx: &egui::Context) {
         let Some(r) = self.lightbox.clone() else { return };
         let uri = doc::blob_uri(&self.dir, &r);
-        let path = doc::blob_path(&self.dir, &r);
         let max = ctx.content_rect().size() * egui::vec2(0.85, 0.75);
         let mut close = false;
-        let mut remove = false;
+        let mut act = None;
         let resp = egui::Modal::new(egui::Id::new("lightbox")).show(ctx, |ui| {
-            ui.add(egui::Image::new(uri).fit_to_exact_size(max).maintain_aspect_ratio(true).corner_radius(4));
+            let img = ui.add(
+                egui::Image::new(uri)
+                    .fit_to_exact_size(max)
+                    .maintain_aspect_ratio(true)
+                    .corner_radius(4)
+                    .sense(egui::Sense::click()),
+            );
+            img.context_menu(|ui| {
+                if let Some(a) = doc::image_menu(ui, &r, vec![r.clone()]) {
+                    act = Some(a);
+                }
+            });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui.button("Öppna i bildvisare").clicked() {
-                    open_external(&path);
+                ui.spacing_mut().button_padding = egui::vec2(8.0, 2.0);
+                let b = |ui: &mut egui::Ui, t: &str, c: egui::Color32| {
+                    ui.add(egui::Button::new(egui::RichText::new(t).size(12.5).color(c))).clicked()
+                };
+                if b(ui, "Kopiera", theme::TEXT) {
+                    act = Some(doc::ImgAction::Copy(r.clone()));
                 }
-                if ui.button("Kopiera bild").clicked() {
-                    if let Err(e) = copy_image(&path) {
-                        log::error(format!("kopiera bild: {e}"));
-                    }
+                if b(ui, "Spara som…", theme::TEXT) {
+                    act = Some(doc::ImgAction::SaveAs(r.clone()));
                 }
-                if ui.button(egui::RichText::new("Ta bort från inlägget").color(theme::ERR)).clicked() {
-                    remove = true;
+                if b(ui, "Öppna med…", theme::TEXT) {
+                    act = Some(doc::ImgAction::OpenWith(r.clone()));
                 }
-                close = ui.button("Stäng").clicked();
-                ui.label(egui::RichText::new("Esc stänger").color(theme::WEAK).size(12.0));
+                if b(ui, "Visa i mapp", theme::TEXT) {
+                    act = Some(doc::ImgAction::Reveal(r.clone()));
+                }
+                if b(ui, "Ta bort", theme::ERR) {
+                    act = Some(doc::ImgAction::Remove(vec![r.clone()]));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    close = b(ui, "Stäng", theme::TEXT);
+                    ui.label(egui::RichText::new("Esc").color(theme::WEAK).size(12.0));
+                });
             });
         });
-        if remove {
-            let doc = match self.mode {
-                Mode::Capture => self.capture.as_mut(),
-                _ => self.main.editor.as_mut(),
-            };
-            if let Some(d) = doc {
-                d.detach(&self.db, &r);
-            }
-            self.main.stale = true;
+        let removed = matches!(act, Some(doc::ImgAction::Remove(_)));
+        if let Some(a) = act {
+            self.image_action(a);
         }
-        if close || remove || resp.should_close() {
+        if close || removed || resp.should_close() {
             self.lightbox = None;
         }
+    }
+
+    /// Applies an image action to the doc that is on screen.
+    pub(crate) fn image_action(&mut self, a: doc::ImgAction) {
+        use doc::ImgAction::*;
+        let path = |r: &str| doc::blob_path(&self.dir, r);
+        match a {
+            Open(r) => self.lightbox = Some(r),
+            Copy(r) => {
+                if let Err(e) = copy_image(&path(&r)) {
+                    log::error(format!("kopiera bild: {e}"));
+                }
+            }
+            SaveAs(r) => {
+                let src = path(&r);
+                let name = format!("omniaware-{}.png", chrono::Local::now().format("%Y%m%d-%H%M%S"));
+                if let Some(dst) = rfd::FileDialog::new().set_file_name(name).add_filter("PNG", &["png"]).save_file()
+                    && let Err(e) = std::fs::copy(&src, &dst)
+                {
+                    log::error(format!("spara som {}: {e}", dst.display()));
+                }
+            }
+            Reveal(r) => reveal(&path(&r)),
+            OpenWith(r) => open_with(&path(&r)),
+            Select(r, add) => {
+                if let Some(d) = self.active_doc() {
+                    d.select(&r, add);
+                }
+            }
+            Remove(list) => {
+                let db = &self.db;
+                let doc = match self.mode {
+                    Mode::Capture => self.capture.as_mut(),
+                    _ => self.main.editor.as_mut(),
+                };
+                if let Some(d) = doc {
+                    for r in &list {
+                        d.detach(db, r);
+                    }
+                }
+                self.main.stale = true;
+            }
+        }
+    }
+
+    fn active_doc(&mut self) -> Option<&mut Doc> {
+        match self.mode {
+            Mode::Capture => self.capture.as_mut(),
+            Mode::Main => self.main.editor.as_mut(),
+            Mode::Hidden => None,
+        }
+    }
+
+    /// Delete removes selected images, Esc clears the selection (when the text field isn't focused).
+    /// Returns true if it consumed Esc.
+    pub(crate) fn selection_keys(&mut self, ctx: &egui::Context) -> bool {
+        if self.lightbox.is_some() {
+            return false;
+        }
+        let Some(d) = self.active_doc() else { return false };
+        if d.selected.is_empty() || d.has_focus(ctx) {
+            return false;
+        }
+        let (del, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Delete), i.key_pressed(egui::Key::Escape)));
+        if del {
+            let list = d.selected.clone();
+            self.image_action(doc::ImgAction::Remove(list));
+        } else if esc {
+            d.selected.clear();
+            return true;
+        }
+        false
     }
 
     /// Ctrl+C+C: store the clipboard as a journal entry without showing anything; tray flashes green.
@@ -481,10 +571,30 @@ impl eframe::App for App {
     }
 }
 
-fn open_external(path: &std::path::Path) {
-    let cmd = if cfg!(windows) { "explorer" } else { "xdg-open" };
-    if let Err(e) = std::process::Command::new(cmd).arg(path).spawn() {
-        log::error(format!("öppna {}: {e}", path.display()));
+/// Windows "Öppna med"-dialogen (val av program); xdg-open elsewhere.
+fn open_with(path: &std::path::Path) {
+    let r = if cfg!(windows) {
+        std::process::Command::new("rundll32.exe")
+            .arg("shell32.dll,OpenAs_RunDLL")
+            .arg(path)
+            .spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(path).spawn()
+    };
+    if let Err(e) = r {
+        log::error(format!("öppna med {}: {e}", path.display()));
+    }
+}
+
+/// Opens the folder holding the original file, with the file selected.
+fn reveal(path: &std::path::Path) {
+    let r = if cfg!(windows) {
+        std::process::Command::new("explorer.exe").arg(format!("/select,{}", path.display())).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(path.parent().unwrap_or(path)).spawn()
+    };
+    if let Err(e) = r {
+        log::error(format!("visa i mapp {}: {e}", path.display()));
     }
 }
 

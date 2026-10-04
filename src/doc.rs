@@ -28,6 +28,8 @@ pub struct Doc {
     pub body: String,
     /// Attached images as blob refs ("<hash>.<ext>"), in order.
     pub images: Vec<String>,
+    /// Selected image tiles (click / Ctrl+click); Delete removes them.
+    pub selected: Vec<String>,
     /// Name field contents ("" = unnamed).
     pub name: String,
     pub saved_name: Option<String>,
@@ -55,6 +57,7 @@ impl Doc {
             id: None,
             body: String::new(),
             images: Vec::new(),
+            selected: Vec::new(),
             name: String::new(),
             saved_name: None,
             created: db::now_ms(),
@@ -263,6 +266,7 @@ impl Doc {
     /// Removes an image from this entry (the file stays in the blob store).
     pub fn detach(&mut self, db: &Db, r: &str) {
         self.images.retain(|x| x != r);
+        self.selected.retain(|x| x != r);
         if let Some(id) = self.id {
             match db.remove_attachment(id, r) {
                 Ok(()) => self.mark_saved(),
@@ -377,33 +381,96 @@ impl Doc {
         });
     }
 
-    /// Thumbnail strip. Returns the ref that was clicked (opens the lightbox).
-    pub fn thumbs(&self, ui: &mut Ui, dir: &Path, size: egui::Vec2) -> Option<String> {
+    /// Click selects, Ctrl+click adds/removes, empty selection clears.
+    pub fn select(&mut self, r: &str, additive: bool) {
+        if additive {
+            if let Some(i) = self.selected.iter().position(|x| x == r) {
+                self.selected.remove(i);
+            } else {
+                self.selected.push(r.to_string());
+            }
+        } else {
+            self.selected = vec![r.to_string()];
+        }
+    }
+
+    /// Thumbnail strip.
+    pub fn thumbs(&self, ui: &mut Ui, dir: &Path, size: egui::Vec2) -> Option<ImgAction> {
         if self.images.is_empty() {
             return None;
         }
-        let mut clicked = None;
+        let mut act = None;
         egui::ScrollArea::horizontal().id_salt(self.editor_id.with("thumbs")).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.set_min_height(size.y + 6.0);
+                ui.set_min_height(size.y + 8.0);
                 for r in &self.images {
-                    if image_tile(ui, dir, r, size).clicked() {
-                        clicked = Some(r.clone());
+                    if let Some(a) = image_tile(ui, dir, r, size, &self.selected) {
+                        act = Some(a);
                     }
                 }
             });
         });
-        clicked
+        act
     }
 
-    /// First image large (for image-only entries). Returns true if clicked.
-    pub fn hero(&self, ui: &mut Ui, dir: &Path, max: egui::Vec2) -> bool {
-        self.images.first().is_some_and(|r| image_tile(ui, dir, r, max).clicked())
+    /// First image large (for image-only entries), the rest as thumbnails.
+    pub fn hero(&self, ui: &mut Ui, dir: &Path, max: egui::Vec2) -> Option<ImgAction> {
+        let mut act = None;
+        ui.horizontal(|ui| {
+            for (i, r) in self.images.iter().enumerate() {
+                let size = if i == 0 { max } else { THUMB };
+                if let Some(a) = image_tile(ui, dir, r, size, &self.selected) {
+                    act = Some(a);
+                }
+            }
+        });
+        act
     }
 }
 
-/// Framed, clickable image: dark backing, 1 px border, accent border on hover.
-pub fn image_tile(ui: &mut Ui, dir: &Path, r: &str, size: egui::Vec2) -> egui::Response {
+/// What the user did with an image tile (handled by the app, which owns the active doc).
+pub enum ImgAction {
+    Open(String),
+    Select(String, bool),
+    Copy(String),
+    SaveAs(String),
+    Reveal(String),
+    OpenWith(String),
+    Remove(Vec<String>),
+}
+
+/// Context menu shared by tiles and the lightbox. `targets` = what "Ta bort" applies to.
+pub fn image_menu(ui: &mut Ui, r: &str, targets: Vec<String>) -> Option<ImgAction> {
+    let mut act = None;
+    let item = |ui: &mut Ui, label: &str| ui.button(egui::RichText::new(label).size(13.0)).clicked();
+    if item(ui, "Kopiera") {
+        act = Some(ImgAction::Copy(r.to_string()));
+    }
+    if item(ui, "Spara som…") {
+        act = Some(ImgAction::SaveAs(r.to_string()));
+    }
+    if item(ui, "Öppna med…") {
+        act = Some(ImgAction::OpenWith(r.to_string()));
+    }
+    if item(ui, "Visa i mapp") {
+        act = Some(ImgAction::Reveal(r.to_string()));
+    }
+    ui.separator();
+    let n = targets.len();
+    let label = if n > 1 { format!("Ta bort {n} bilder") } else { "Ta bort".to_string() };
+    if ui.button(egui::RichText::new(label).size(13.0).color(theme::ERR)).clicked() {
+        act = Some(ImgAction::Remove(targets));
+    }
+    if act.is_some() {
+        ui.close();
+    }
+    act
+}
+
+/// Framed image tile: click = select, Ctrl+click = multi-select, double-click = enlarge,
+/// right-click = menu. Selected tiles get an accent border and a check mark.
+pub fn image_tile(ui: &mut Ui, dir: &Path, r: &str, size: egui::Vec2, selected: &[String]) -> Option<ImgAction> {
+    let is_sel = selected.iter().any(|x| x == r);
     let img = egui::Image::new(blob_uri(dir, r))
         .fit_to_exact_size(size)
         .maintain_aspect_ratio(true)
@@ -416,12 +483,32 @@ pub fn image_tile(ui: &mut Ui, dir: &Path, r: &str, size: egui::Vec2) -> egui::R
         .inner_margin(egui::Margin::same(3))
         .show(ui, |ui| ui.add(img))
         .inner
-        .on_hover_cursor(egui::CursorIcon::ZoomIn)
-        .on_hover_text("Klicka för större bild");
-    if resp.hovered() {
-        ui.painter().rect_stroke(resp.rect.expand(3.0), 6.0, egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
+        .on_hover_text("Dubbelklick: förstora · Ctrl+klick: markera flera · Högerklick: meny");
+    let frame = resp.rect.expand(3.0);
+    if is_sel {
+        ui.painter().rect_stroke(frame, 6.0, egui::Stroke::new(2.0, theme::ACCENT), egui::StrokeKind::Inside);
+        let c = frame.right_top() + egui::vec2(-12.0, 12.0);
+        ui.painter().circle(c, 8.0, theme::BG, egui::Stroke::new(1.5, theme::ACCENT));
+        ui.painter().text(c, egui::Align2::CENTER_CENTER, "✓", egui::FontId::monospace(11.0), theme::ACCENT);
+    } else if resp.hovered() {
+        ui.painter().rect_stroke(frame, 6.0, egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
     }
-    resp
+    let mut act = None;
+    if resp.double_clicked() {
+        act = Some(ImgAction::Open(r.to_string()));
+    } else if resp.clicked() {
+        act = Some(ImgAction::Select(r.to_string(), ui.input(|i| i.modifiers.ctrl)));
+    }
+    if resp.secondary_clicked() && !is_sel {
+        act = Some(ImgAction::Select(r.to_string(), false));
+    }
+    let targets = if is_sel { selected.to_vec() } else { vec![r.to_string()] };
+    resp.context_menu(|ui| {
+        if let Some(a) = image_menu(ui, r, targets) {
+            act = Some(a);
+        }
+    });
+    act
 }
 
 pub fn blob_path(dir: &Path, r: &str) -> std::path::PathBuf {

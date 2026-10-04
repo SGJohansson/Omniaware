@@ -25,8 +25,9 @@ impl App {
         // ---- keys (the lightbox owns Esc while it is open) ----
         let modal = self.lightbox.is_some();
         let mut action = Action::None;
+        let esc_used = self.selection_keys(&ctx);
         let (esc, shift) = ctx.input(|i| (i.key_pressed(Key::Escape), i.modifiers.shift));
-        if modal {
+        if modal || esc_used {
         } else if esc {
             if self.capture_naming {
                 self.capture_naming = false;
@@ -51,7 +52,7 @@ impl App {
         let today = chrono::Local::now().date_naive();
         let Some(doc) = self.capture.as_mut() else { return };
 
-        let mut open_image = None;
+        let mut img_act = None;
 
         // ---- header (drag handle) ----
         egui::Panel::top("cap_hdr").frame(bar(theme::BG, 12, 8)).show(ui, |ui| {
@@ -74,8 +75,8 @@ impl App {
 
         // ---- footer ----
         egui::Panel::bottom("cap_ftr").frame(bar(theme::BG, 12, 8)).show(ui, |ui| {
-            if let Some(r) = doc.thumbs(ui, &dir, crate::doc::THUMB) {
-                open_image = Some(r);
+            if let Some(a) = doc.thumbs(ui, &dir, crate::doc::THUMB) {
+                img_act = Some(a);
             }
             ui.horizontal(|ui| {
                 if naming {
@@ -122,8 +123,8 @@ impl App {
             doc.editor(ui, "Skriv eller klistra in…");
         });
 
-        if open_image.is_some() {
-            self.lightbox = open_image;
+        if let Some(a) = img_act {
+            self.image_action(a);
         }
         if confirm {
             let ok = self.capture.as_mut().is_some_and(|d| d.commit_name(&self.db));
