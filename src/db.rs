@@ -267,6 +267,13 @@ impl Db {
         )
     }
 
+    /// Body of the most recently created live entry (to avoid re-capturing the same clipboard).
+    pub fn latest_body(&self) -> Result<Option<String>> {
+        self.conn
+            .query_row("SELECT body FROM entry WHERE deleted IS NULL ORDER BY created DESC LIMIT 1", [], |r| r.get(0))
+            .optional()
+    }
+
     pub fn clear_name(&self, id: i64) -> Result<()> {
         self.conn.execute("UPDATE entry SET name=NULL, updated=?1 WHERE id=?2", params![now_ms(), id])?;
         Ok(())

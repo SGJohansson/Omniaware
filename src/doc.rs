@@ -12,6 +12,23 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 const TOAST_IN: f32 = 0.15;
 const TOAST_HOLD: f32 = 2.5;
 const TOAST_OUT: f32 = 0.6;
+const THUMB: egui::Vec2 = egui::vec2(160.0, 96.0);
+
+/// Byte ranges of `![…](blob:…)` image references (drawn dimmed in the editor).
+fn image_spans(text: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(i) = text[from..].find("![") {
+        let s = from + i;
+        let Some(j) = text[s..].find(')') else { break };
+        let e = s + j + 1;
+        if text[s..e].contains("(blob:") {
+            out.push((s, e));
+        }
+        from = e;
+    }
+    out
+}
 
 pub enum Status {
     Idle,
@@ -278,7 +295,7 @@ impl Doc {
             return;
         }
         ctx.request_repaint();
-        let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, self.editor_id.with("toast")));
+        let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, self.editor_id.with("toast")));
         let g = p.layout_no_wrap("✓ Sparad".into(), egui::FontId::monospace(12.0), theme::OK.gamma_multiply(a));
         let size = g.size() + egui::vec2(16.0, 8.0);
         let rect = egui::Rect::from_min_size(area.right_bottom() - size - egui::vec2(10.0, 10.0), size);
@@ -302,6 +319,22 @@ impl Doc {
             .inner_margin(egui::Margin::same(10))
             .show(ui, |ui| {
                 let avail = ui.available_size();
+                let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
+                    let text = buf.as_str();
+                    let font = egui::TextStyle::Monospace.resolve(ui.style());
+                    let normal = egui::TextFormat::simple(font.clone(), theme::TEXT);
+                    let dim = egui::TextFormat::simple(font, theme::DIM);
+                    let mut job = egui::text::LayoutJob::default();
+                    job.wrap.max_width = wrap;
+                    let mut at = 0;
+                    for (s, e) in image_spans(text) {
+                        job.append(&text[at..s], 0.0, normal.clone());
+                        job.append(&text[s..e], 0.0, dim.clone());
+                        at = e;
+                    }
+                    job.append(&text[at..], 0.0, normal);
+                    ui.fonts_mut(|f| f.layout_job(job))
+                };
                 let resp = egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -311,6 +344,7 @@ impl Doc {
                                 .id(self.editor_id)
                                 .font(egui::TextStyle::Monospace)
                                 .frame(egui::Frame::NONE)
+                                .layouter(&mut layouter)
                                 .desired_width(f32::INFINITY)
                                 .lock_focus(true)
                                 .hint_text(hint),
@@ -344,20 +378,39 @@ impl Doc {
         });
     }
 
-    /// Thumbnail strip of referenced images.
-    pub fn thumbs(&self, ui: &mut Ui, dir: &Path) {
+    /// Thumbnail strip of referenced images. Returns the ref that was clicked (open in lightbox).
+    pub fn thumbs(&self, ui: &mut Ui, dir: &Path) -> Option<String> {
         let refs = db::blob_refs(&self.body);
         if refs.is_empty() {
-            return;
+            return None;
         }
+        let mut clicked = None;
         egui::ScrollArea::horizontal().id_salt("thumbs").show(ui, |ui| {
             ui.horizontal(|ui| {
+                ui.set_min_height(THUMB.y + 4.0);
                 for r in refs {
-                    ui.add(egui::Image::new(blob_uri(dir, &r)).max_height(64.0).corner_radius(4));
+                    let img = egui::Image::new(blob_uri(dir, &r))
+                        .fit_to_exact_size(THUMB)
+                        .maintain_aspect_ratio(true)
+                        .corner_radius(4)
+                        .sense(egui::Sense::click());
+                    let resp = ui.add(img).on_hover_cursor(egui::CursorIcon::ZoomIn).on_hover_text("Klicka för större bild");
+                    if resp.hovered() {
+                        ui.painter().rect_stroke(resp.rect, 4.0, egui::Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Outside);
+                    }
+                    if resp.clicked() {
+                        clicked = Some(r);
+                    }
                 }
             });
         });
+        clicked
     }
+}
+
+pub fn blob_path(dir: &Path, r: &str) -> std::path::PathBuf {
+    let (hash, ext) = r.split_once('.').unwrap_or((r, "png"));
+    blob::path_for(dir, hash, ext)
 }
 
 pub fn blob_uri(dir: &Path, r: &str) -> String {
@@ -376,6 +429,12 @@ fn file_uri(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn spans() {
+        let t = "a ![](blob:ab.png) b ![x](https://x) c";
+        assert_eq!(super::image_spans(t).iter().map(|&(s, e)| &t[s..e]).collect::<Vec<_>>(), vec!["![](blob:ab.png)"]);
+    }
+
     #[test]
     fn file_uris() {
         assert_eq!(super::file_uri(r"C:\Users\x\blobs\4d\4d9e.png"), "file:///C:/Users/x/blobs/4d/4d9e.png");

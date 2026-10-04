@@ -12,6 +12,7 @@ pub const BG_FIELD: Color32 = Color32::from_rgb(28, 29, 33);
 pub const LINE: Color32 = Color32::from_rgb(44, 46, 52);
 pub const TEXT: Color32 = Color32::from_rgb(222, 224, 228);
 pub const WEAK: Color32 = Color32::from_rgb(128, 132, 140);
+pub const DIM: Color32 = Color32::from_rgb(84, 88, 96);
 pub const OK: Color32 = Color32::from_rgb(110, 196, 132);
 pub const WARN: Color32 = Color32::from_rgb(230, 180, 90);
 pub const ERR: Color32 = Color32::from_rgb(232, 110, 100);

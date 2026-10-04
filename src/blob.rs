@@ -12,7 +12,8 @@ pub fn store_rgba(data_dir: &Path, w: u32, h: u32, rgba: &[u8]) -> Result<String
     let mut png = Vec::new();
     img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
         .map_err(|e| e.to_string())?;
-    let hash = blake3::hash(&png).to_hex().to_string();
+    // 80-bit prefix of BLAKE3: collision-free in practice and keeps `![](blob:…)` refs short.
+    let hash = blake3::hash(&png).to_hex()[..20].to_string();
     let path = path_for(data_dir, &hash, "png");
     if path.exists() {
         return Ok(hash);

@@ -211,7 +211,9 @@ impl App {
 
         // ---- global keys ----
         let nothing_focused = ctx.memory(|m| m.focused().is_none());
-        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+        if self.lightbox.is_some() {
+            // the lightbox owns Esc
+        } else if ctx.input(|i| i.key_pressed(Key::Escape)) {
             if self.main.editor.is_some() {
                 self.close_editor();
             } else if self.main.view != View::Timeline {
@@ -661,6 +663,7 @@ impl App {
         let mut back = false;
         let mut discard = false;
         let mut commit = false;
+        let mut open_image = None;
         let Some(ed) = self.main.editor.as_mut() else { return };
         ui.horizontal(|ui| {
             back = ui.button("← Tillbaka").clicked();
@@ -703,10 +706,16 @@ impl App {
             egui::Panel::bottom("ed_thumbs")
                 .frame(egui::Frame::new().inner_margin(Margin::symmetric(0, 4)))
                 .show_separator_line(false)
-                .show(ui, |ui| ed.thumbs(ui, &dir));
+                .show(ui, |ui| ed.thumbs(ui, &dir))
+                .inner
+                .map(|r| open_image = Some(r));
             egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
                 ed.editor(ui, "Skriv… markdown fungerar, Ctrl+E förhandsvisar.");
             });
+        }
+        if open_image.is_some() {
+            self.lightbox = open_image;
+            return;
         }
         if commit {
             ed.commit_name(&self.db);

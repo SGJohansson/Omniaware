@@ -62,6 +62,8 @@ pub struct App {
     pub(crate) capture_naming: bool,
     pub(crate) main: MainState,
     pub(crate) md_cache: egui_commonmark::CommonMarkCache,
+    /// Image ref shown enlarged in a modal.
+    pub(crate) lightbox: Option<String>,
 }
 
 impl App {
@@ -172,6 +174,7 @@ impl App {
             capture_naming: false,
             main: MainState::new(),
             md_cache: Default::default(),
+            lightbox: None,
         }
     }
 
@@ -229,6 +232,10 @@ impl App {
                 }
             }
             Err(e) => log::error(format!("urklipp: {e}")),
+        }
+        // Pressing the shortcut again with an unchanged clipboard should not create a duplicate.
+        if !d.body.is_empty() && self.db.latest_body().ok().flatten().as_deref() == Some(d.body.as_str()) {
+            d.body.clear();
         }
         if !d.body.is_empty() {
             d.mark_dirty();
@@ -301,6 +308,34 @@ impl App {
     pub(crate) fn paste_back(&mut self, ctx: &egui::Context, text: String) {
         self.hide(ctx);
         win::paste_to(self.prev_fg, text);
+    }
+
+    /// Enlarged image with open/copy actions. Esc or a click outside closes it.
+    fn lightbox_ui(&mut self, ctx: &egui::Context) {
+        let Some(r) = self.lightbox.clone() else { return };
+        let uri = doc::blob_uri(&self.dir, &r);
+        let path = doc::blob_path(&self.dir, &r);
+        let max = ctx.content_rect().size() * egui::vec2(0.85, 0.75);
+        let mut close = false;
+        let resp = egui::Modal::new(egui::Id::new("lightbox")).show(ctx, |ui| {
+            ui.add(egui::Image::new(uri).fit_to_exact_size(max).maintain_aspect_ratio(true).corner_radius(4));
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Öppna i bildvisare").clicked() {
+                    open_external(&path);
+                }
+                if ui.button("Kopiera bild").clicked() {
+                    if let Err(e) = copy_image(&path) {
+                        log::error(format!("kopiera bild: {e}"));
+                    }
+                }
+                close = ui.button("Stäng").clicked();
+                ui.label(egui::RichText::new("Esc stänger").color(theme::WEAK).size(12.0));
+            });
+        });
+        if close || resp.should_close() {
+            self.lightbox = None;
+        }
     }
 
     /// Ctrl+C+C: store the clipboard as a journal entry without showing anything; tray flashes green.
@@ -421,11 +456,27 @@ impl eframe::App for App {
             Mode::Capture => {
                 self.poll_image_paste(&ctx);
                 self.capture_ui(ui);
+                self.lightbox_ui(&ctx);
             }
             Mode::Main => {
                 self.poll_image_paste(&ctx);
                 self.main_ui(ui);
+                self.lightbox_ui(&ctx);
             }
         }
     }
+}
+
+fn open_external(path: &std::path::Path) {
+    let cmd = if cfg!(windows) { "explorer" } else { "xdg-open" };
+    if let Err(e) = std::process::Command::new(cmd).arg(path).spawn() {
+        log::error(format!("öppna {}: {e}", path.display()));
+    }
+}
+
+fn copy_image(path: &std::path::Path) -> Result<(), String> {
+    let img = image::open(path).map_err(|e| e.to_string())?.to_rgba8();
+    let (w, h) = img.dimensions();
+    let data = arboard::ImageData { width: w as usize, height: h as usize, bytes: img.into_raw().into() };
+    arboard::Clipboard::new().and_then(|mut c| c.set_image(data)).map_err(|e| e.to_string())
 }
