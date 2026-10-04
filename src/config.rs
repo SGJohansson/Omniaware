@@ -16,10 +16,10 @@ pub struct Config {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Hotkeys {
-    /// global-hotkey syntax: modifiers alt/ctrl/shift/super + key code, e.g. "super+KeyO".
-    /// Opens the capture popup.
+    /// global-hotkey syntax: modifiers alt/ctrl/shift/super + key code, e.g. "ctrl+alt+KeyO".
+    /// Press once: capture popup. Again while it is open: expand to the main window. Again: close.
     pub capture: String,
-    /// Opens/closes the main window (timeline, calendar, search).
+    /// Optional direct shortcut for the main window ("" = none).
     pub main: String,
 }
 
@@ -40,7 +40,7 @@ impl Default for Config {
 }
 impl Default for Hotkeys {
     fn default() -> Self {
-        Self { capture: "super+KeyO".into(), main: "ctrl+alt+KeyO".into() }
+        Self { capture: "ctrl+alt+KeyO".into(), main: String::new() }
     }
 }
 impl Default for WindowCfg {
@@ -49,7 +49,7 @@ impl Default for WindowCfg {
     }
 }
 
-pub const CONFIG_VERSION: u32 = 2;
+pub const CONFIG_VERSION: u32 = 3;
 
 /// %OMNIAWARE_DATA% if set, else %APPDATA%\Omniaware (moved from the pre-rename %APPDATA%\Omniware once).
 pub fn data_dir() -> PathBuf {
@@ -96,14 +96,14 @@ pub fn load(dir: &Path) -> Config {
     }
 }
 
-/// v0/v1 → v2: replace the old default hotkeys (Win+Alt+V / Win+Alt+Space) with Win+O / Ctrl+Alt+O.
+/// Replace earlier default hotkeys with the current ones (single Ctrl+Alt+O, no separate main key).
 /// Hotkeys the user changed themselves are kept.
 fn migrate(cfg: &mut Config) {
     let d = Hotkeys::default();
-    if cfg.hotkeys.capture == "super+alt+KeyV" {
+    if ["super+alt+KeyV", "super+KeyO"].contains(&cfg.hotkeys.capture.as_str()) {
         cfg.hotkeys.capture = d.capture;
     }
-    if cfg.hotkeys.main == "super+alt+Space" {
+    if ["super+alt+Space", "ctrl+alt+KeyO"].contains(&cfg.hotkeys.main.as_str()) {
         cfg.hotkeys.main = d.main;
     }
     cfg.version = CONFIG_VERSION;
@@ -118,8 +118,12 @@ mod tests {
         let mut c: Config = toml::from_str("[hotkeys]\ncapture = \"super+alt+KeyV\"\n").unwrap();
         assert_eq!(c.version, 0);
         migrate(&mut c);
-        assert_eq!(c.hotkeys.capture, "super+KeyO");
-        assert_eq!(c.hotkeys.main, "ctrl+alt+KeyO");
+        assert_eq!(c.hotkeys.capture, "ctrl+alt+KeyO");
+        assert_eq!(c.hotkeys.main, "");
+        let mut c: Config =
+            toml::from_str("version = 2\n[hotkeys]\ncapture = \"super+KeyO\"\nmain = \"ctrl+alt+KeyO\"\n").unwrap();
+        migrate(&mut c);
+        assert_eq!((c.hotkeys.capture.as_str(), c.hotkeys.main.as_str()), ("ctrl+alt+KeyO", ""));
         let mut c: Config = toml::from_str("[hotkeys]\ncapture = \"ctrl+F1\"\n").unwrap();
         migrate(&mut c);
         assert_eq!(c.hotkeys.capture, "ctrl+F1");

@@ -83,7 +83,7 @@ pub fn hint(ui: &mut Ui, keys: &[&str], label: &str) {
         ui.add_space(4.0);
         ui.label(RichText::new(label).color(WEAK).size(12.0));
     });
-    ui.add_space(12.0);
+    ui.add_space(9.0);
 }
 
 pub fn keycap(ui: &mut Ui, k: &str) {

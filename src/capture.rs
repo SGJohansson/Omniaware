@@ -77,6 +77,7 @@ impl App {
                     hint(ui, &["Esc"], "avbryt");
                 } else {
                     hint(ui, &["Esc"], "spara");
+                    hint(ui, &["Ctrl", "Alt", "O"], "vidga");
                     hint(ui, &["Ctrl", "S"], "namnge");
                     hint(ui, &["Ctrl", "V"], "bild");
                     hint(ui, &["Shift", "Esc"], "kasta");

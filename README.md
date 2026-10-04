@@ -4,13 +4,12 @@ A lightweight, keyboard-first home for everything I don't want to lose: clipboar
 
 I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markdown editor and browser-based note tools. The goals are simple: it should be there the instant I need it, stay out of the way when I don't, and never lose a single character — not even on a power cut.
 
-> **Status:** early development (v0.2). Windows 10/11 only. The interface is currently in Swedish.
+> **Status:** early development (v0.3). Windows 10/11 only. The interface is currently in Swedish.
 
 ## Features
 
 - **Silent capture** — press `Ctrl+C` twice in quick succession and the clipboard (text or image) is saved straight to today's journal. The tray icon briefly turns green; nothing else interrupts you.
-- **Capture popup** — `Win+O` opens a small window pre-filled with the clipboard. Type, paste images, give it a name, press `Esc`. Done.
-- **Timeline and calendar** — `Ctrl+Alt+O` opens the main window: a day-by-day timeline, a month calendar marking days with content, named entries and a recycle bin.
+- **One key for everything else** — `Ctrl+Alt+O` opens a small capture window pre-filled with the clipboard. Press it again and the same note expands into the main window: a day-by-day timeline, a month calendar marking days with content, named entries and a recycle bin. Press it a third time to put everything away.
 - **Full-text search** — `Ctrl+K` searches everything. `Shift+Enter` pastes the result straight into the window you came from.
 - **Markdown** — entries are plain Markdown with a rendered preview (`Ctrl+E`), including images and task lists.
 - **Named snippets** — give an entry a name (`Ctrl+S`) and it becomes a reusable snippet, much like an AutoHotkey text store.
@@ -23,14 +22,15 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 | Shortcut | Action |
 |---|---|
 | `Ctrl+C` `C` | Save the clipboard silently (hold `Ctrl`, tap `C` twice) |
-| `Win+O` / tray click | Capture popup, pre-filled with the clipboard |
-| `Ctrl+Alt+O` (or `AltGr+O`) | Open / close the main window |
+| `Ctrl+Alt+O` (or `AltGr+O`) | 1st press: capture popup · 2nd: expand to the main window · 3rd: close |
+| Tray icon click | Capture popup |
 
 **Capture popup**
 
 | Shortcut | Action |
 |---|---|
 | `Esc` | Save and close (empty entries are discarded) |
+| `Ctrl+Alt+O` | Keep the note and expand to the main window |
 | `Shift+Esc` | Move to the recycle bin |
 | `Ctrl+S` | Name the entry. If the name is taken, `Enter` again moves the name here; the previous entry is kept, unnamed |
 | `Ctrl+V` | Paste text or an image |
@@ -45,7 +45,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 | `Ctrl+E` | Toggle edit / preview |
 | `Esc` | Back, then close |
 
-All global shortcuts can be changed in `config.toml`.
+Shortcuts can be changed in `config.toml`.
 
 ## Installation
 
@@ -92,8 +92,8 @@ How it avoids losing data:
 renderer = "wgpu"            # "glow" switches to OpenGL if the GPU driver misbehaves
 
 [hotkeys]
-capture = "super+KeyO"       # modifiers: ctrl / alt / shift / super
-main = "ctrl+alt+KeyO"
+capture = "ctrl+alt+KeyO"    # modifiers: ctrl / alt / shift / super
+main = ""                    # optional direct shortcut to the main window
 
 [window]
 width = 640.0                # capture popup

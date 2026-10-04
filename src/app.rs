@@ -82,9 +82,14 @@ impl App {
         let mut ids: Vec<(u32, fn(&Signals) -> &AtomicBool)> = Vec::new();
         let hotkeys = match GlobalHotKeyManager::new() {
             Ok(mgr) => {
+                // `main` is optional; skip it when empty or identical to `capture`.
+                let main = if cfg.hotkeys.main == cfg.hotkeys.capture { "" } else { cfg.hotkeys.main.as_str() };
                 let specs: [(&str, fn(&Signals) -> &AtomicBool); 2] =
-                    [(&cfg.hotkeys.capture, |s| &s.capture), (&cfg.hotkeys.main, |s| &s.main)];
+                    [(&cfg.hotkeys.capture, |s| &s.capture), (main, |s| &s.main)];
                 for (spec, flag) in specs {
+                    if spec.trim().is_empty() {
+                        continue;
+                    }
                     match spec.parse::<HotKey>().map_err(|e| e.to_string()).and_then(|hk| {
                         mgr.register(hk).map_err(|e| e.to_string())?;
                         Ok(hk.id())
@@ -256,9 +261,23 @@ impl App {
                 return;
             }
             Mode::Capture => {
+                // Expand: keep editing the same entry in the main window.
                 if let Some(mut d) = self.capture.take() {
-                    d.close(&self.db);
+                    if self.capture_naming {
+                        d.commit_name(&self.db);
+                    }
+                    d.flush(&self.db);
+                    if d.body.trim().is_empty() {
+                        d.close(&self.db);
+                    } else {
+                        d.focus = true;
+                        if let Some(mut old) = self.main.editor.replace(d) {
+                            old.close(&self.db);
+                        }
+                    }
                 }
+                self.capture_naming = false;
+                self.return_to_main = false;
             }
             Mode::Hidden => self.prev_fg = win::foreground(),
         }
@@ -365,7 +384,12 @@ impl eframe::App for App {
             t.flash(false);
         }
         if self.sig.capture.swap(false, SeqCst) {
-            self.open_capture(ctx);
+            // One key, three steps: popup → main window → closed.
+            match self.mode {
+                Mode::Hidden => self.open_capture(ctx),
+                Mode::Capture => self.open_main(ctx),
+                Mode::Main => self.hide(ctx),
+            }
         }
         if self.sig.main.swap(false, SeqCst) {
             if self.mode == Mode::Main { self.hide(ctx) } else { self.open_main(ctx) }

@@ -423,7 +423,6 @@ impl App {
     }
 
     fn hint_bar(&mut self, ui: &mut Ui) {
-        let cap = theme::hotkey_caps(&self.cfg.hotkeys.capture);
         let editor = self.main.editor.is_some();
         let view = self.main.view;
         egui::Panel::bottom("m_hints")
@@ -465,12 +464,7 @@ impl App {
                             ui.ctx().send_viewport_cmd(ViewportCommand::BeginResize(egui::ResizeDirection::SouthEast));
                         }
                         ui.add_space(8.0);
-                        ui.label(RichText::new("snabbruta").color(theme::WEAK).size(12.0));
                         ui.spacing_mut().item_spacing.x = 3.0;
-                        for k in cap.iter().rev() {
-                            theme::keycap(ui, k);
-                        }
-                        ui.add_space(12.0);
                         ui.label(RichText::new("tyst fångst").color(theme::WEAK).size(12.0));
                         for k in ["C", "C", "Ctrl"] {
                             theme::keycap(ui, k);
@@ -511,6 +505,7 @@ impl App {
             empty_note(
                 ui,
                 &format!("Inget här än. Ctrl+C+C sparar urklippet direkt, {caps} öppnar snabbrutan, Ctrl+N skriver nytt."),
+
             );
             return;
         }
