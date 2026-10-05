@@ -84,7 +84,7 @@ pub fn load(dir: &Path) -> Config {
                 cfg
             }
             Err(e) => {
-                crate::log::error(format!("config.toml ogiltig, använder standard: {e}"));
+                crate::log::error(format!("config.toml is invalid, using defaults: {e}"));
                 Config::default()
             }
         },

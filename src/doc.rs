@@ -1,7 +1,7 @@
 //! One open entry being edited (capture popup or main-window editor): autosave, naming, images.
 
 use crate::db::{self, Db, Entry, Img};
-use crate::{blob, log, theme};
+use crate::{blob, log, text as t, theme};
 use egui::text::{CCursor, CCursorRange};
 use egui::{Id, TextEdit, Ui};
 use std::collections::HashMap;
@@ -154,7 +154,7 @@ impl Doc {
                     self.mark_saved(first);
                 }
             }
-            Err(e) => self.fail(format!("sparning: {e}")),
+            Err(e) => self.fail(format!("save: {e}")),
         }
     }
 
@@ -186,7 +186,7 @@ impl Doc {
             db.delete_soft(id)
         };
         if let Err(e) = r {
-            self.fail(format!("stängning: {e}"));
+            self.fail(format!("close: {e}"));
         }
     }
 
@@ -195,7 +195,7 @@ impl Doc {
         if let Some(id) = self.id
             && let Err(e) = db.delete_soft(id)
         {
-            self.fail(format!("kasta: {e}"));
+            self.fail(format!("discard: {e}"));
         }
     }
 
@@ -207,7 +207,7 @@ impl Doc {
             return true;
         }
         if !self.has_content() {
-            self.name_msg = Some("Tomt inlägg, inget att namnge.".into());
+            self.name_msg = Some(t::NAME_EMPTY.into());
             return false;
         }
         self.dirty = true;
@@ -220,21 +220,19 @@ impl Doc {
                     true
                 }
                 Err(e) => {
-                    self.fail(format!("namn: {e}"));
+                    self.fail(format!("name: {e}"));
                     false
                 }
             };
         }
         match db.name_owner(&name) {
             Ok(Some(owner)) if owner != id && self.name_takeover.as_deref() != Some(name.as_str()) => {
-                self.name_msg = Some(format!(
-                    "”{name}” finns redan. Enter igen flyttar namnet hit, det gamla inlägget behålls utan namn."
-                ));
+                self.name_msg = Some(t::name_taken(&name));
                 self.name_takeover = Some(name);
                 return false;
             }
             Err(e) => {
-                self.fail(format!("namn: {e}"));
+                self.fail(format!("name: {e}"));
                 return false;
             }
             _ => {}
@@ -247,7 +245,7 @@ impl Doc {
                 true
             }
             Err(e) => {
-                self.fail(format!("namn: {e}"));
+                self.fail(format!("name: {e}"));
                 false
             }
         }
@@ -286,7 +284,7 @@ impl Doc {
                     self.dirty = false;
                 }
                 Err(e) => {
-                    self.fail(format!("sparning: {e}"));
+                    self.fail(format!("save: {e}"));
                     return Attach::Failed;
                 }
             }
@@ -299,7 +297,7 @@ impl Doc {
                 Attach::Added
             }
             Err(e) => {
-                self.fail(format!("bild: {e}"));
+                self.fail(format!("image: {e}"));
                 Attach::Failed
             }
         }
@@ -311,7 +309,7 @@ impl Doc {
         self.selected.retain(|x| *x != aid);
         match db.remove_attachment(aid) {
             Ok(()) => self.mark_saved(true),
-            Err(e) => self.fail(format!("bild: {e}")),
+            Err(e) => self.fail(format!("image: {e}")),
         }
     }
 
@@ -329,13 +327,13 @@ impl Doc {
         self.dirty = true;
         self.flush(db);
         let Some(id) = self.id else {
-            self.show_toast("Inget att spara än".into());
+            self.show_toast(t::ST_NOTHING.into());
             return;
         };
         match db.add_revision(id, &self.body).and_then(|()| db.revision_count(id)) {
             Ok(n) => {
                 self.pulse = Some(Instant::now());
-                self.show_toast(format!("✓ Sparad · version {n}"));
+                self.show_toast(t::toast_saved(n));
             }
             Err(e) => self.fail(format!("version: {e}")),
         }
@@ -361,11 +359,11 @@ impl Doc {
         let stuck = self.dirty && self.last_edit.elapsed() > STUCK;
         let (col, tip) = match &self.status {
             Status::Error(e) => (theme::ERR, e.clone()),
-            _ if stuck => (theme::WARN, "Ändringar väntar på att sparas".to_string()),
-            _ if self.dirty && matches!(self.status, Status::Idle) => (theme::WEAK, "Sparas automatiskt".to_string()),
-            Status::Saved(t) => (theme::OK, format!("Allt ligger på disk (senast {t}). Ctrl+S sparar en version.")),
-            Status::Clean => (theme::OK, "Allt ligger på disk. Ctrl+S sparar en version.".to_string()),
-            Status::Idle => (theme::WEAK, "Inget att spara än".to_string()),
+            _ if stuck => (theme::WARN, t::ST_WAITING.to_string()),
+            _ if self.dirty && matches!(self.status, Status::Idle) => (theme::WEAK, t::ST_AUTOSAVE.to_string()),
+            Status::Saved(at) => (theme::OK, t::st_on_disk_at(at)),
+            Status::Clean => (theme::OK, t::ST_ON_DISK.to_string()),
+            Status::Idle => (theme::WEAK, t::ST_NOTHING.to_string()),
         };
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
         let c = rect.center();
@@ -379,7 +377,7 @@ impl Doc {
         ui.painter().circle_filled(c, 4.0, col);
         resp.on_hover_text(tip);
         if let Status::Error(_) = self.status {
-            ui.label(egui::RichText::new("fel vid sparning").color(theme::ERR).size(12.0));
+            ui.label(egui::RichText::new(t::ST_FAILED).color(theme::ERR).size(12.0));
         }
     }
 
@@ -414,21 +412,28 @@ impl Doc {
             .inner_margin(egui::Margin::same(10))
             .show(ui, |ui| {
                 let avail = ui.available_size();
-                let resp = egui::ScrollArea::vertical()
+                let font = egui::TextStyle::Monospace.resolve(ui.style());
+                let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
+                    let mut job = crate::markup::job(buf.as_str(), &font);
+                    job.wrap.max_width = wrap;
+                    ui.fonts_mut(|f| f.layout_job(job))
+                };
+                let out = egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.add_sized(
-                            avail,
-                            TextEdit::multiline(&mut self.body)
-                                .id(self.editor_id)
-                                .font(egui::TextStyle::Monospace)
-                                .frame(egui::Frame::NONE)
-                                .desired_width(f32::INFINITY)
-                                .lock_focus(true)
-                                .hint_text(hint),
-                        )
+                        TextEdit::multiline(&mut self.body)
+                            .id(self.editor_id)
+                            .font(egui::TextStyle::Monospace)
+                            .frame(egui::Frame::NONE)
+                            .desired_width(f32::INFINITY)
+                            .min_size(avail)
+                            .lock_focus(true)
+                            .hint_text(hint)
+                            .layouter(&mut layouter)
+                            .show(ui)
                     })
                     .inner;
+                let resp = out.response.response.clone();
                 if resp.changed() {
                     self.mark_dirty();
                 }
@@ -436,6 +441,7 @@ impl Doc {
                     resp.request_focus();
                     self.focus = false;
                 }
+                self.link_hover(ui, &out);
             });
         self.paint_toast(&ctx, framed.response.rect);
         if self.cursor_to_end {
@@ -444,12 +450,45 @@ impl Doc {
         }
     }
 
+    /// Links in the editor: underlined always; Ctrl+click opens (a plain click places the cursor).
+    fn link_hover(&self, ui: &Ui, out: &egui::text_edit::TextEditOutput) {
+        let resp = &out.response.response;
+        let Some(p) = resp.hover_pos() else { return };
+        let rel = p - out.galley_pos;
+        let cc = out.galley.cursor_from_pos(rel);
+        let byte = self.body.char_indices().nth(cc.index.0).map_or(self.body.len(), |(b, _)| b);
+        let Some(link) = crate::markup::link_at(&self.body, byte) else { return };
+        // cursor_from_pos snaps to the nearest character; require the pointer to be on the link itself.
+        let chars = |b: usize| self.body[..b].chars().count();
+        let a = out.galley.pos_from_cursor(CCursor::new(chars(link.range.start)));
+        let z = out.galley.pos_from_cursor(CCursor::new(chars(link.range.end)));
+        let same_row = (a.min.y..=a.max.y).contains(&rel.y) || (z.min.y..=z.max.y).contains(&rel.y);
+        if !same_row && a.min.y == z.min.y {
+            return;
+        }
+        if a.min.y == z.min.y && !(a.min.x..=z.max.x).contains(&rel.x) {
+            return;
+        }
+        if ui.input(|i| i.modifiers.command) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            if resp.clicked() {
+                theme::open_url(&link.url);
+            }
+        } else {
+            resp.clone().on_hover_text_at_pointer(t::link_tip(&link.url));
+        }
+    }
+
     /// Rendered markdown, `blob:` refs resolved to files.
     pub fn preview_ui(&self, ui: &mut Ui, cache: &mut egui_commonmark::CommonMarkCache, dir: &Path) {
         // Images first, then the text. <…> lets CommonMark accept paths with spaces.
         let mut text: String = self.images.iter().map(|i| format!("![](<{}>)\n\n", blob_uri(dir, &i.blob))).collect();
-        text.push_str(&self.body);
+        text.push_str(&crate::markup::autolink(&self.body));
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            // The app-wide text colour override would paint links like plain text here.
+            let v = ui.visuals_mut();
+            v.override_text_color = None;
+            v.widgets.noninteractive.fg_stroke.color = theme::TEXT;
             egui_commonmark::CommonMarkViewer::new().max_image_width(Some(720)).show(ui, cache, &text);
         });
     }
@@ -562,25 +601,25 @@ pub fn info_chip(ui: &mut Ui, dir: &Path, blob: &str, font: f32) {
     }
 }
 
-/// Context menu shared by tiles and the lightbox. `targets` = attachment ids "Ta bort" applies to.
+/// Context menu shared by tiles and the lightbox. `targets` = attachment ids "remove" applies to.
 pub fn image_menu(ui: &mut Ui, blob: &str, targets: Vec<i64>) -> Option<ImgAction> {
     let mut act = None;
     let item = |ui: &mut Ui, label: &str| ui.button(egui::RichText::new(label).size(13.0)).clicked();
-    if item(ui, "kopiera") {
+    if item(ui, t::BTN_COPY) {
         act = Some(ImgAction::Copy(blob.to_string()));
     }
-    if item(ui, "spara som…") {
+    if item(ui, t::BTN_SAVE_AS) {
         act = Some(ImgAction::SaveAs(blob.to_string()));
     }
-    if item(ui, "öppna med…") {
+    if item(ui, t::BTN_OPEN_WITH) {
         act = Some(ImgAction::OpenWith(blob.to_string()));
     }
-    if item(ui, "visa i mapp") {
+    if item(ui, t::BTN_REVEAL) {
         act = Some(ImgAction::Reveal(blob.to_string()));
     }
     ui.separator();
     let n = targets.len();
-    let label = if n > 1 { format!("ta bort {n} bilder") } else { "ta bort".to_string() };
+    let label = t::btn_remove_n(n);
     if ui.button(egui::RichText::new(label).size(13.0).color(theme::ERR)).clicked() {
         act = Some(ImgAction::Remove(targets));
     }
@@ -596,7 +635,7 @@ const COPY_FG: egui::Color32 = egui::Color32::from_rgb(159, 225, 203);
 use theme::runs;
 
 /// Image tile: click = select, Ctrl+click = multi-select, double-click = enlarge, right-click = menu.
-/// Always shows "#n" (and "kopia av #m") top-left and a "W×H · size" badge bottom-right;
+/// Always shows "#n" (and "copy of #m") top-left and a "W×H · size" badge bottom-right;
 /// on hover or when selected, a side panel with size, dimensions and format replaces the badge.
 pub fn image_tile(
     ui: &mut Ui,
@@ -620,7 +659,7 @@ pub fn image_tile(
         .inner_margin(egui::Margin::same(3))
         .show(ui, |ui| ui.add(picture))
         .inner
-        .on_hover_text("Dubbelklick: förstora · Ctrl+klick: markera flera · Högerklick: meny");
+        .on_hover_text(t::TIP_TILE);
     let r = resp.rect;
     let p = ui.painter().with_clip_rect(r);
     let (dim, txt, acc) = (theme::WEAK, theme::TEXT, theme::ACCENT);
@@ -628,7 +667,7 @@ pub fn image_tile(
     // top-left: number / copy label (+ check when selected)
     let check = if is_sel { "✓ " } else { "" };
     let (label, fg, bg) = match copy_of {
-        Some(m) => (format!("{check}#{n} · kopia av #{m}"), COPY_FG, theme::ACCENT_DIM),
+        Some(m) => (format!("{check}{}", t::copy_of(n, m)), COPY_FG, theme::ACCENT_DIM),
         None => (format!("{check}#{n}"), txt, SHADE),
     };
     let g = p.layout_no_wrap(label, egui::FontId::monospace(10.5), fg);
@@ -645,8 +684,8 @@ pub fn image_tile(
             let panel = egui::Rect::from_min_max(egui::pos2(r.right() - pw, r.top()), r.max);
             p.rect_filled(panel, 0.0, SHADE);
             let rows: [(&str, Vec<(&str, egui::Color32)>); 2] = [
-                ("storlek", vec![(&sv, acc), (" ", dim), (su, dim)]),
-                ("mått", vec![(&w, acc), ("×", txt), (&h, acc), (" px", dim)]),
+                (t::SIDE_SIZE, vec![(&sv, acc), (" ", dim), (su, dim)]),
+                (t::SIDE_DIMS, vec![(&w, acc), ("×", txt), (&h, acc), (" px", dim)]),
             ];
             let mut y = panel.top() + 7.0;
             for (lbl, val) in rows {
@@ -752,8 +791,8 @@ mod tests {
 }
 
 pub fn store_image(db: &Db, dir: &Path, img: &arboard::ImageData<'_>) -> Result<String, String> {
-    let hash = blob::store_rgba(dir, img.width as u32, img.height as u32, &img.bytes).map_err(|e| format!("bild: {e}"))?;
-    db.add_blob(&hash, "image/png").map_err(|e| format!("bild-db: {e}"))?;
+    let hash = blob::store_rgba(dir, img.width as u32, img.height as u32, &img.bytes).map_err(|e| format!("image: {e}"))?;
+    db.add_blob(&hash, "image/png").map_err(|e| format!("image db: {e}"))?;
     Ok(format!("{hash}.png"))
 }
 

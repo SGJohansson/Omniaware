@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::db::Db;
 use crate::doc::{self, Doc};
 use crate::main_view::MainState;
-use crate::{log, theme, tray, win};
+use crate::{log, text as t, theme, tray, win};
 use egui::ViewportCommand;
 use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
@@ -62,11 +62,13 @@ pub struct App {
 
     pub(crate) capture: Option<Doc>,
     pub(crate) capture_naming: bool,
+    /// Give the name field focus on the next frame (only once, so Tab / clicks can leave it).
+    pub(crate) capture_name_focus: bool,
     pub(crate) main: MainState,
     pub(crate) md_cache: egui_commonmark::CommonMarkCache,
     /// Image ref shown enlarged in a modal.
     pub(crate) lightbox: Option<crate::db::Img>,
-    /// Pasted picture already in the entry: (blob, #n) waiting for "Lägg till kopia?".
+    /// Pasted picture already in the entry: (blob, #n) waiting for "add copy?".
     pub(crate) dup_prompt: Option<(String, usize)>,
     /// Shortcut overlay in the capture popup ("?" button / hold F1).
     pub(crate) capture_help: bool,
@@ -107,13 +109,13 @@ impl App {
                         Ok(hk.id())
                     }) {
                         Ok(id) => ids.push((id, flag)),
-                        Err(e) => log::error(format!("kortkommando '{spec}': {e}")),
+                        Err(e) => log::error(format!("hotkey '{spec}': {e}")),
                     }
                 }
                 Some(mgr)
             }
             Err(e) => {
-                log::error(format!("kortkommandon: {e}"));
+                log::error(format!("hotkeys: {e}"));
                 None
             }
         };
@@ -133,7 +135,7 @@ impl App {
             win::on_double_copy(move || poke(&s, &c, |s| &s.stash));
         }
 
-        let tray = match if cfg!(windows) { tray::build() } else { Err("tray: bara Windows".into()) } {
+        let tray = match if cfg!(windows) { tray::build() } else { Err("tray: Windows only".into()) } {
             Ok(t) => {
                 let (s, c) = (sig.clone(), ctx.clone());
                 let (cap, main, quit) = (t.capture_id.clone(), t.main_id.clone(), t.quit_id.clone());
@@ -183,6 +185,7 @@ impl App {
             last_stash: None,
             capture: None,
             capture_naming: false,
+            capture_name_focus: false,
             main: MainState::new(),
             md_cache: Default::default(),
             lightbox: None,
@@ -263,7 +266,7 @@ impl App {
 
     /// Clipboard as text, or as an image stored in the blob store.
     fn read_clipboard(&self) -> Option<Clip> {
-        let mut cb = arboard::Clipboard::new().map_err(|e| log::error(format!("urklipp: {e}"))).ok()?;
+        let mut cb = arboard::Clipboard::new().map_err(|e| log::error(format!("clipboard: {e}"))).ok()?;
         if let Ok(t) = cb.get_text()
             && !t.trim().is_empty()
         {
@@ -367,32 +370,33 @@ impl App {
                     act = Some(a);
                 }
             });
+            // Facts under the picture like a caption; actions on their own row.
+            ui.add_space(4.0);
+            doc::info_chip(ui, &self.dir, &r, 11.5);
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().button_padding = egui::vec2(8.0, 2.0);
                 let b = |ui: &mut egui::Ui, t: &str, c: egui::Color32| {
                     ui.add(egui::Button::new(egui::RichText::new(t).size(12.5).color(c))).clicked()
                 };
-                if b(ui, "kopiera", theme::TEXT) {
+                if b(ui, t::BTN_COPY, theme::TEXT) {
                     act = Some(doc::ImgAction::Copy(r.clone()));
                 }
-                if b(ui, "spara som…", theme::TEXT) {
+                if b(ui, t::BTN_SAVE_AS, theme::TEXT) {
                     act = Some(doc::ImgAction::SaveAs(r.clone()));
                 }
-                if b(ui, "öppna med…", theme::TEXT) {
+                if b(ui, t::BTN_OPEN_WITH, theme::TEXT) {
                     act = Some(doc::ImgAction::OpenWith(r.clone()));
                 }
-                if b(ui, "visa i mapp", theme::TEXT) {
+                if b(ui, t::BTN_REVEAL, theme::TEXT) {
                     act = Some(doc::ImgAction::Reveal(r.clone()));
                 }
-                if b(ui, "ta bort", theme::ERR) {
+                if b(ui, t::BTN_REMOVE, theme::ERR) {
                     act = Some(doc::ImgAction::Remove(vec![img.id]));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    close = theme::quiet_button(ui, "stäng").clicked();
+                    close = theme::quiet_button(ui, t::BTN_CLOSE).clicked();
                     theme::key_hint(ui, &["esc"]);
-                    ui.add_space(12.0);
-                    doc::info_chip(ui, &self.dir, &r, 11.5);
                 });
             });
         });
@@ -413,7 +417,7 @@ impl App {
             Open(r) => self.lightbox = Some(r),
             Copy(r) => {
                 if let Err(e) = copy_image(&path(&r)) {
-                    log::error(format!("kopiera bild: {e}"));
+                    log::error(format!("copy image: {e}"));
                 }
             }
             SaveAs(r) => {
@@ -422,7 +426,7 @@ impl App {
                 if let Some(dst) = rfd::FileDialog::new().set_file_name(name).add_filter("PNG", &["png"]).save_file()
                     && let Err(e) = std::fs::copy(&src, &dst)
                 {
-                    log::error(format!("spara som {}: {e}", dst.display()));
+                    log::error(format!("save as {}: {e}", dst.display()));
                 }
             }
             Reveal(r) => reveal(&path(&r)),
@@ -497,7 +501,7 @@ impl App {
                     self.main.stale = true;
                     self.last_stash = Some(key);
                 }
-                Err(e) => return log::error(format!("tyst fångst: {e}")),
+                Err(e) => return log::error(format!("silent capture: {e}")),
             }
         }
         self.flash_tray(ctx);
@@ -542,7 +546,7 @@ impl App {
         }
     }
 
-    /// "Bilden är identisk med #n – lägg till som kopia?"
+    /// "This image is identical to #n" – add it as a copy?
     fn dup_prompt_ui(&mut self, ctx: &egui::Context) {
         let Some((blob, n)) = self.dup_prompt.clone() else { return };
         let mut answer = None;
@@ -566,8 +570,8 @@ impl App {
                 ui.add_space(4.0);
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.label(egui::RichText::new(format!("Bilden är identisk med #{n}")).family(theme::medium()));
-                    ui.label(egui::RichText::new("Kopian delar fil – tar ingen plats").color(theme::WEAK).size(11.5));
+                    ui.label(egui::RichText::new(t::dup_title(n)).family(theme::medium()));
+                    ui.label(egui::RichText::new(t::DUP_NOTE).color(theme::WEAK).size(11.5));
                     ui.add_space(10.0);
                     doc::info_chip(ui, &dir, &blob, 11.5);
                 });
@@ -577,10 +581,10 @@ impl App {
             ui.painter().hline(line.x_range(), line.top(), egui::Stroke::new(1.0, theme::LINE));
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if theme::primary_button(ui, "lägg till kopia").clicked() {
+                if theme::primary_button(ui, t::BTN_ADD_COPY).clicked() {
                     answer = Some(true);
                 }
-                if theme::quiet_button(ui, "avbryt").clicked() {
+                if theme::quiet_button(ui, t::BTN_CANCEL).clicked() {
                     answer = Some(false);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -684,10 +688,25 @@ impl eframe::App for App {
                 self.dup_prompt_ui(&ctx);
             }
         }
+        // eframe is built without its browser feature; links (e.g. in the preview) open here.
+        let urls: Vec<String> = ctx.output_mut(|o| {
+            let mut v = Vec::new();
+            o.commands.retain(|c| match c {
+                egui::OutputCommand::OpenUrl(u) => {
+                    v.push(u.url.clone());
+                    false
+                }
+                _ => true,
+            });
+            v
+        });
+        for u in urls {
+            theme::open_url(&u);
+        }
     }
 }
 
-/// Windows "Öppna med"-dialogen (val av program); xdg-open elsewhere.
+/// The Windows "Open with" dialog (choose a program); xdg-open elsewhere.
 fn open_with(path: &std::path::Path) {
     let r = if cfg!(windows) {
         std::process::Command::new("rundll32.exe")
@@ -698,7 +717,7 @@ fn open_with(path: &std::path::Path) {
         std::process::Command::new("xdg-open").arg(path).spawn()
     };
     if let Err(e) = r {
-        log::error(format!("öppna med {}: {e}", path.display()));
+        log::error(format!("open with {}: {e}", path.display()));
     }
 }
 
@@ -710,7 +729,7 @@ fn reveal(path: &std::path::Path) {
         std::process::Command::new("xdg-open").arg(path.parent().unwrap_or(path)).spawn()
     };
     if let Err(e) = r {
-        log::error(format!("visa i mapp {}: {e}", path.display()));
+        log::error(format!("show in folder {}: {e}", path.display()));
     }
 }
 

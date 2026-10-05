@@ -8,6 +8,8 @@ mod db;
 mod doc;
 mod log;
 mod main_view;
+mod text;
+mod markup;
 mod theme;
 mod tray;
 mod win;
@@ -20,7 +22,7 @@ fn main() {
 
     let dir = config::data_dir();
     if let Err(e) = std::fs::create_dir_all(&dir) {
-        eprintln!("kan inte skapa {}: {e}", dir.display());
+        eprintln!("cannot create {}: {e}", dir.display());
         return;
     }
     log::init(&dir);
@@ -32,7 +34,7 @@ fn main() {
     let db = match db::Db::open(&db_path) {
         Ok(db) => db,
         Err(e) => {
-            log::error(format!("databas: {e}"));
+            log::error(format!("database: {e}"));
             return;
         }
     };

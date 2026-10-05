@@ -102,6 +102,8 @@ pub struct Item {
     pub blobs: Vec<String>,
     /// Words in the text body.
     pub words: usize,
+    /// Bare links in the text body.
+    pub links: usize,
     /// Display time: `starts` for events in range, else `created` (or `updated`/`deleted` for lists).
     pub time: i64,
     pub is_event: bool,
@@ -111,7 +113,7 @@ pub struct Item {
 pub fn preview_of(body: &str) -> String {
     let line = body
         .lines()
-        .map(|l| strip_images(l).trim().to_string())
+        .map(|l| strip_marks(strip_images(l).trim()).to_string())
         .find(|l| !l.is_empty())
         .unwrap_or_default();
     let mut out: String = line.chars().take(140).collect();
@@ -119,6 +121,18 @@ pub fn preview_of(body: &str) -> String {
         out.push('…');
     }
     out
+}
+
+/// Leading Markdown block syntax ("# ", "> ", "- [ ] ", "1. ") is noise in a one-line preview.
+fn strip_marks(line: &str) -> &str {
+    let mut l = line.trim_start_matches('#').trim_start_matches('>').trim_start();
+    for p in ["- [ ] ", "- [x] ", "- [X] ", "- ", "* ", "+ "] {
+        if let Some(r) = l.strip_prefix(p) {
+            l = r;
+            break;
+        }
+    }
+    l.trim_start()
 }
 
 fn strip_images(line: &str) -> String {
@@ -165,6 +179,7 @@ fn item_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item> {
             .map(|s| s.split(',').map(str::to_string).collect())
             .unwrap_or_default(),
         words: body.split_whitespace().filter(|w| !w.starts_with("![](")).count(),
+        links: crate::markup::find_links(&body).len(),
         time: r.get(3)?,
         is_event: r.get::<_, i64>(4)? != 0,
     })

@@ -4,15 +4,17 @@ A lightweight, keyboard-first home for everything I don't want to lose: clipboar
 
 I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markdown editor and browser-based note tools. The goals are simple: it should be there the instant I need it, stay out of the way when I don't, and never lose a single character — not even on a power cut.
 
-> **Status:** early development (v0.3). Windows 10/11 only. The interface is currently in Swedish.
+> **Status:** early development (v0.4). Windows 10/11 only. The interface is in British English.
 
 ## Features
 
 - **Silent capture** — press `Ctrl+C` twice in quick succession and the clipboard (text or image) is saved straight to today's journal. The tray icon briefly turns green; nothing else interrupts you.
 - **One key for everything else** — `Ctrl+Alt+O` opens a small capture window pre-filled with the clipboard. Press it again and the same note expands into the main window: a day-by-day timeline, a month calendar marking days with content, named entries and a recycle bin. Press it a third time to put everything away.
 - **Full-text search** — `Ctrl+K` searches everything. `Shift+Enter` pastes the result straight into the window you came from.
-- **Markdown and images** — entries are plain Markdown text with a rendered preview (`Ctrl+E`). Pasted images are kept as attachments shown above the text; an image-only entry is displayed full size with the text as its caption. Every image is numbered and shows its dimensions and file size; hover for the full details. Pasting a picture that is already attached asks before adding it as a copy (the file is shared, not duplicated). Click to select (`Ctrl`+click for several, `Delete` removes), double-click to enlarge, right-click to copy, save, open with another program or show the file in Explorer.
-- **Named snippets** — give an entry a name (`F2`) and it becomes a reusable snippet, much like an AutoHotkey text store.
+- **Markdown and links** — entries are plain Markdown. The editor highlights headings, **bold**, *italics*, `code`, lists, task boxes and quotes as you type, and every web, FTP, file or `mailto:` address becomes a link (`Ctrl`+click to open). `Ctrl+E` shows the rendered preview.
+- **Images** — pasted images are kept as attachments shown above the text; an image-only entry is displayed full size with the text as its caption. Every image is numbered and shows its dimensions and file size; hover for the full details. Pasting a picture that is already attached asks before adding it as a copy (the file is shared, not duplicated). Click to select (`Ctrl`+click for several, `Delete` removes), double-click to enlarge, right-click to copy, save, open with another program or show the file in Explorer.
+- **Named snippets** — give an entry a name (`F2`) and it becomes a reusable snippet, much like an AutoHotkey text store. `Enter` or `Tab` takes you straight back to the text.
+- **At a glance** — the timeline shows each entry's word count, number of images, size on disk and links next to the time.
 - **Crash-safe by design** — see [Data and durability](#data-and-durability).
 
 ## Keyboard shortcuts
@@ -33,9 +35,10 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 | `Ctrl+Alt+O` | Keep the note and expand to the main window |
 | `Shift+Esc` | Move to the recycle bin |
 | `Ctrl+S` | Save a version now |
-| `F2` | Name the entry. If the name is taken, `Enter` again moves the name here; the previous entry is kept, unnamed |
-| `F1` (hold) or `?` | Show shortcuts |
+| `F2` | Name the entry. `Enter` / `Tab` back to the text, `Ctrl+Enter` name and close. If the name is taken, `Enter` again moves it here; the previous entry is kept, unnamed |
+| `F1` (hold or click) | Show all shortcuts; the most common ones are always listed along the bottom |
 | `Ctrl+V` | Paste text or an image |
+| `Ctrl`+click | Open a link |
 
 **Main window**
 
@@ -45,6 +48,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 | `Ctrl+K` | Search. `Enter` opens, `Shift+Enter` pastes into the previous window |
 | `Ctrl+N` | New entry |
 | `Ctrl+E` | Toggle edit / preview |
+| `Ctrl`+click | Open a link |
 | `Ctrl+S` / `F2` | Save a version / name the entry |
 | `F1` | Show or hide the shortcut panel |
 | `Esc` | Back, then close |
@@ -117,6 +121,10 @@ main_height = 700.0
 ## Built with
 
 [Rust](https://www.rust-lang.org/), [egui](https://github.com/emilk/egui), [SQLite](https://sqlite.org/) via rusqlite, and the [JetBrains Mono](https://www.jetbrains.com/lp/mono/) typeface.
+
+## Author
+
+Made by S.G. Johansson — [voidflow.tech](https://voidflow.tech/).
 
 ## License
 

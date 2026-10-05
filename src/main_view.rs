@@ -3,6 +3,7 @@
 use crate::app::App;
 use crate::db::Item;
 use crate::doc::Doc;
+use crate::text as t;
 use crate::theme;
 use chrono::{Datelike, Duration, Local, NaiveDate, TimeZone};
 use egui::{Align, Align2, Color32, FontId, Id, Key, Layout, Margin, Modifiers, RichText, Sense, Ui, ViewportCommand};
@@ -75,14 +76,23 @@ fn date_of(ms: i64) -> Option<NaiveDate> {
 }
 
 /// Clickable full-width row painted directly (time | glyph | name chip | preview).
-const META_W: f32 = 132.0;
+const META_W: f32 = 146.0;
 
-/// "2 bilder │ 312 kB" (unique files, so copies add nothing) or "48 ord".
+/// "2 images │ 312 kB" (unique files, so copies add nothing) or "48 words", plus "│ 2 links".
 fn row_meta(ui: &Ui, dir: &std::path::Path, it: &Item) -> std::sync::Arc<egui::Galley> {
     let (acc, dim, faint) = (theme::ACCENT, theme::WEAK, theme::FAINT);
     if it.blobs.is_empty() {
         let n = it.words.to_string();
-        return if it.words == 0 { theme::runs(ui, &[("–", faint)], 11.0) } else { theme::runs(ui, &[(&n, acc), (" ord", dim)], 11.0) };
+        let l = it.links.to_string();
+        let mut parts: Vec<(&str, Color32)> = if it.words == 0 {
+            vec![("–", faint)]
+        } else {
+            vec![(&n, acc), (" ", dim), (t::plural(it.words, "word", "words"), dim)]
+        };
+        if it.links > 0 {
+            parts.extend([(" │ ", faint), (&l, acc), (" ", dim), (t::plural(it.links, "link", "links"), dim)]);
+        }
+        return theme::runs(ui, &parts, 11.0);
     }
     let mut seen = std::collections::HashSet::new();
     let bytes: u64 = it
@@ -95,7 +105,12 @@ fn row_meta(ui: &Ui, dir: &std::path::Path, it: &Item) -> std::sync::Arc<egui::G
     let n = it.blobs.len();
     let (v, u) = crate::doc::fmt_size(bytes);
     let cnt = n.to_string();
-    theme::runs(ui, &[(&cnt, acc), (if n == 1 { " bild" } else { " bilder" }, dim), (" │ ", faint), (&v, acc), (" ", dim), (u, dim)], 11.0)
+    let l = it.links.to_string();
+    let mut parts = vec![(cnt.as_str(), acc), (" ", dim), (t::plural(n, "image", "images"), dim), (" │ ", faint), (&v, acc), (" ", dim), (u, dim)];
+    if it.links > 0 {
+        parts.extend([(" │ ", faint), (&l, acc), (" ", dim), (t::plural(it.links, "link", "links"), dim)]);
+    }
+    theme::runs(ui, &parts, 11.0)
 }
 
 fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool) -> egui::Response {
@@ -135,8 +150,9 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool
     x += time_w;
     // Summary column: images and their size on disk, or the word count for text-only entries.
     let meta = row_meta(ui, dir, it);
+    let mw = meta.size().x;
     p.galley(egui::pos2(x, cy - meta.size().y / 2.0), meta, theme::WEAK);
-    x += META_W;
+    x += META_W.max(mw + 16.0);
     let glyph = if it.is_event { "◆" } else if it.name.is_some() { "#" } else { "·" };
     p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, glyph, font.clone(), if it.is_event { theme::ACCENT } else { theme::WEAK });
     x += 20.0;
@@ -150,9 +166,9 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool
     }
     let (text, col) = match (it.preview.is_empty(), it.images) {
         (false, _) => (it.preview.clone(), fg),
-        (true, 0) => ("(tomt)".to_string(), theme::WEAK),
-        (true, 1) => ("bild".to_string(), theme::WEAK),
-        (true, _) => ("bilder".to_string(), theme::WEAK),
+        (true, 0) => (t::ROW_EMPTY.to_string(), theme::WEAK),
+        (true, 1) => (t::ROW_IMAGE.to_string(), theme::WEAK),
+        (true, _) => (t::ROW_IMAGES.to_string(), theme::WEAK),
     };
     p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, text, font, col);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -171,7 +187,7 @@ impl App {
         let from = local_ms(m.day);
         let to = local_ms(m.day + Duration::days(1));
         m.items = self.db.day_items(from, to).unwrap_or_else(|e| {
-            crate::log::error(format!("tidslinje: {e}"));
+            crate::log::error(format!("timeline: {e}"));
             Vec::new()
         });
         let (mf, mt) = (local_ms(m.month), local_ms(month_end(m.month)));
@@ -217,7 +233,7 @@ impl App {
         self.close_editor();
         match self.db.get(id) {
             Ok(e) => self.main.editor = Some(Doc::open(e, &format!("ed-{id}"))),
-            Err(e) => crate::log::error(format!("öppna {id}: {e}")),
+            Err(e) => crate::log::error(format!("open {id}: {e}")),
         }
     }
 
@@ -332,25 +348,25 @@ impl App {
             .show(ui, |ui| {
                 if open {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Genvägar").family(theme::medium()));
+                        ui.label(RichText::new(t::SHORTCUTS).family(theme::medium()));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            toggle = ui.add(egui::Button::new("›").frame(false)).on_hover_text("Fäll in (F1)").clicked();
+                            toggle = ui.add(egui::Button::new("›").frame(false)).on_hover_text(t::TIP_COLLAPSE).clicked();
                             ui.label(RichText::new("F1").color(theme::WEAK).size(11.5));
                         });
                     });
                     ui.add_space(8.0);
                     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                        theme::shortcut_groups(ui, theme::MAIN_KEYS);
+                        theme::shortcut_groups(ui, t::MAIN_KEYS);
                         theme::status_legend(ui);
                     });
                 } else {
                     // Whole strip is the tab; vertical label reads bottom-to-top.
                     let rect = ui.max_rect();
-                    let resp = ui.interact(rect, Id::new("keys_tab"), Sense::click()).on_hover_text("Genvägar (F1)");
+                    let resp = ui.interact(rect, Id::new("keys_tab"), Sense::click()).on_hover_text(t::TIP_SHORTCUTS);
                     if resp.hovered() {
                         ui.painter().rect_filled(rect, 0.0, Color32::from_rgb(30, 32, 36));
                     }
-                    let g = ui.painter().layout_no_wrap("?  genvägar · F1".into(), FontId::monospace(11.5), theme::WEAK);
+                    let g = ui.painter().layout_no_wrap(t::SHORTCUTS_TAB.into(), FontId::monospace(11.5), theme::WEAK);
                     let pos = egui::pos2(rect.center().x - g.size().y / 2.0, rect.top() + 16.0 + g.size().x);
                     ui.painter().add(egui::epaint::TextShape::new(pos, g, theme::WEAK).with_angle(-std::f32::consts::FRAC_PI_2));
                     toggle = resp.clicked();
@@ -363,30 +379,38 @@ impl App {
 
     fn top_bar(&mut self, ui: &mut Ui) {
         let section = if self.main.editor.is_some() {
-            "Inlägg"
+            t::ENTRY
         } else {
             match self.main.view {
-                View::Timeline => "Tidslinje",
-                View::Named => "Namngivna",
-                View::Trash => "Papperskorg",
-                View::Search => "Sök",
+                View::Timeline => t::TIMELINE,
+                View::Named => t::NAMED,
+                View::Trash => t::BIN,
+                View::Search => t::SEARCH,
             }
         };
         let mut close = false;
         let mut new = false;
         egui::Panel::top("m_top")
-            .frame(egui::Frame::new().fill(theme::BG_SIDE).inner_margin(Margin::symmetric(12, 7)))
+            .frame(egui::Frame::new().fill(theme::BG_SIDE).inner_margin(Margin { left: 14, right: 12, top: 11, bottom: 10 }))
             .show(ui, |ui| {
                 if ui.interact(ui.max_rect(), Id::new("m_drag"), Sense::drag()).drag_started() {
                     ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
                 }
                 ui.horizontal(|ui| {
-                        ui.label(RichText::new("Omniaware").family(theme::medium()).color(theme::ACCENT));
-                        ui.label(RichText::new(format!("/  {section}")).color(theme::WEAK));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            close = ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Stäng (Esc)").clicked();
-                            ui.add_space(6.0);
-                            new = ui.button("+ nytt").on_hover_text("Ctrl+N").clicked();
+                        // Wordmark: bold name, version right after it (baseline-aligned), then the section.
+                        ui.spacing_mut().item_spacing.x = 7.0;
+                        ui.label(RichText::new("Omniaware").family(crate::markup::bold_family()).size(19.0).color(theme::ACCENT));
+                        ui.with_layout(Layout::left_to_right(Align::Max), |ui| {
+                            ui.spacing_mut().item_spacing.x = 7.0;
+                            ui.add_space(-2.0);
+                            ui.label(RichText::new(concat!("v", env!("CARGO_PKG_VERSION"))).size(11.5).color(theme::FAINT));
+                            ui.add_space(10.0);
+                            ui.label(RichText::new(format!("/  {section}")).color(theme::WEAK));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                close = ui.add(egui::Button::new("✕").frame(false)).on_hover_text(t::TIP_CLOSE).clicked();
+                                ui.add_space(6.0);
+                                new = ui.button(t::BTN_NEW).on_hover_text("Ctrl+N").clicked();
+                            });
                         });
                     })
 ;
@@ -414,7 +438,7 @@ impl App {
                 let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
                 let p = ui.painter_at(rect);
                 p.rect(rect, 5.0, theme::BG_FIELD, egui::Stroke::new(1.0, theme::LINE), egui::StrokeKind::Inside);
-                p.text(rect.left_center() + egui::vec2(10.0, 0.0), Align2::LEFT_CENTER, "Sök", FontId::monospace(13.0), theme::WEAK);
+                p.text(rect.left_center() + egui::vec2(10.0, 0.0), Align2::LEFT_CENTER, t::SEARCH, FontId::monospace(13.0), theme::WEAK);
                 p.text(rect.right_center() - egui::vec2(10.0, 0.0), Align2::RIGHT_CENTER, "Ctrl K", FontId::monospace(11.0), theme::WEAK);
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     goto = Some(View::Search);
@@ -422,7 +446,7 @@ impl App {
                 ui.add_space(10.0);
 
                 let cur = if self.main.editor.is_some() { None } else { Some(self.main.view) };
-                for (v, label) in [(View::Timeline, "◔  Tidslinje"), (View::Named, "#  Namngivna"), (View::Trash, "⌫  Papperskorg")] {
+                for (v, label) in [(View::Timeline, t::NAV_TIMELINE), (View::Named, t::NAV_NAMED), (View::Trash, t::NAV_BIN)] {
                     let on = cur == Some(v);
                     let txt = RichText::new(label).color(if on { theme::TEXT } else { theme::WEAK });
                     let b = egui::Button::new(txt)
@@ -458,7 +482,7 @@ impl App {
                 let cell = (ui.available_width() / 7.0).floor();
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    for wd in ["m", "t", "o", "t", "f", "l", "s"] {
+                    for wd in t::WD_LETTER {
                         let (r, _) = ui.allocate_exact_size(egui::vec2(cell, 18.0), Sense::hover());
                         ui.painter().text(r.center(), Align2::CENTER_CENTER, wd, FontId::monospace(11.0), theme::WEAK);
                     }
@@ -496,7 +520,7 @@ impl App {
                     });
                 }
                 ui.add_space(6.0);
-                if ui.add(egui::Button::new(RichText::new("idag").size(12.0)).min_size(egui::vec2(ui.available_width(), 24.0))).clicked() {
+                if ui.add(egui::Button::new(RichText::new(t::BTN_TODAY).size(12.0)).min_size(egui::vec2(ui.available_width(), 24.0))).clicked() {
                     pick_day = Some(today);
                 }
                 ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
@@ -530,10 +554,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(RichText::new(theme::day_long(day, today)).family(theme::medium()).size(18.0));
             let events = self.main.items.iter().filter(|i| i.is_event).count();
-            let mut meta = format!("{} inlägg", self.main.items.len() - events);
-            if events > 0 {
-                meta.push_str(&format!(" · {events} {}", if events == 1 { "händelse" } else { "händelser" }));
-            }
+            let meta = t::day_meta(self.main.items.len() - events, events);
             ui.label(RichText::new(meta).color(theme::WEAK).size(12.0));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.button("›").clicked() {
@@ -553,7 +574,7 @@ impl App {
             let caps = theme::hotkey_caps(&self.cfg.hotkeys.capture).join("+");
             empty_note(
                 ui,
-                &format!("Inget här än. Ctrl+C+C sparar urklippet direkt, {caps} öppnar snabbrutan, Ctrl+N skriver nytt."),
+                &t::empty_day(&caps),
 
             );
             return;
@@ -573,17 +594,17 @@ impl App {
 
     fn named_view(&mut self, ui: &mut Ui) {
         let dir = self.dir.clone();
-        ui.label(RichText::new("Namngivna").family(theme::medium()).size(18.0));
+        ui.label(RichText::new(t::NAMED).family(theme::medium()).size(18.0));
         ui.add_space(8.0);
         if self.main.list.is_empty() {
-            return empty_note(ui, "Inga namngivna inlägg. Ctrl+S i snabbrutan ger ett namn.");
+            return empty_note(ui, t::EMPTY_NAMED);
         }
         let mut open = None;
         let mut copy = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for it in &self.main.list {
                 ui.horizontal(|ui| {
-                    if ui.small_button("kopiera").clicked() {
+                    if ui.small_button(t::BTN_COPY).clicked() {
                         copy = Some(it.id);
                     }
                     let d = date_of(it.time).map(theme::day_short).unwrap_or_default();
@@ -605,10 +626,10 @@ impl App {
 
     fn trash_view(&mut self, ui: &mut Ui) {
         let dir = self.dir.clone();
-        ui.label(RichText::new("Papperskorg").family(theme::medium()).size(18.0));
+        ui.label(RichText::new(t::BIN).family(theme::medium()).size(18.0));
         ui.add_space(8.0);
         if self.main.list.is_empty() {
-            return empty_note(ui, "Papperskorgen är tom.");
+            return empty_note(ui, t::EMPTY_BIN);
         }
         let mut restore = None;
         let mut purge = None;
@@ -616,10 +637,10 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for it in &self.main.list {
                 ui.horizontal(|ui| {
-                    if ui.small_button("återställ").clicked() {
+                    if ui.small_button(t::BTN_RESTORE).clicked() {
                         restore = Some(it.id);
                     }
-                    let label = if confirm == Some(it.id) { "säker?" } else { "radera" };
+                    let label = if confirm == Some(it.id) { t::BTN_SURE } else { t::BTN_DELETE };
                     if ui.small_button(RichText::new(label).color(theme::ERR)).clicked() {
                         purge = Some(it.id);
                     }
@@ -630,14 +651,14 @@ impl App {
         });
         if let Some(id) = restore {
             if let Err(e) = self.db.restore(id) {
-                crate::log::error(format!("återställ: {e}"));
+                crate::log::error(format!("restore: {e}"));
             }
             self.main.stale = true;
         }
         if let Some(id) = purge {
             if confirm == Some(id) {
                 if let Err(e) = self.db.delete_hard(id) {
-                    crate::log::error(format!("radera: {e}"));
+                    crate::log::error(format!("delete: {e}"));
                 }
                 self.main.stale = true;
             } else {
@@ -652,7 +673,7 @@ impl App {
         let r = ui.add(
             egui::TextEdit::singleline(&mut self.main.query)
                 .id(Id::new("m_search"))
-                .hint_text("Sök i allt…")
+                .hint_text(t::SEARCH_HINT)
                 .desired_width(f32::INFINITY)
                 .margin(Margin::symmetric(10, 6)),
         );
@@ -678,7 +699,7 @@ impl App {
         ui.add_space(8.0);
         if n == 0 {
             if !self.main.query.trim().is_empty() {
-                empty_note(ui, "Inga träffar.");
+                empty_note(ui, t::NO_MATCHES);
             }
             return;
         }
@@ -719,10 +740,10 @@ impl App {
         // Row 1: navigation + name on the left, actions on the right. Row 2: timestamp.
         // Buttons are placed first (right-to-left) so a narrow window shrinks the name field, not them.
         ui.horizontal(|ui| {
-            back = ui.button("← tillbaka").clicked();
+            back = ui.button(t::BTN_BACK).clicked();
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                discard = ui.button(RichText::new("kasta").color(theme::ERR)).clicked();
-                let lbl = if ed.preview { "redigera" } else { "förhandsvisa" };
+                discard = ui.button(RichText::new(t::BTN_DISCARD).color(theme::ERR)).clicked();
+                let lbl = if ed.preview { t::BTN_EDIT } else { t::BTN_PREVIEW };
                 if ui.button(lbl).on_hover_text("Ctrl+E").clicked() {
                     ed.preview = !ed.preview;
                     ed.focus = !ed.preview;
@@ -734,7 +755,7 @@ impl App {
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut ed.name)
                         .id(Id::new("ed_name"))
-                        .hint_text("namn (valfritt, F2)")
+                        .hint_text(t::NAME_HINT_MAIN)
                         .desired_width(w)
                         .margin(Margin::symmetric(8, 4)),
                 );
@@ -779,7 +800,7 @@ impl App {
                     .inner
                     .map(|a| img_act = Some(a));
             }
-            let hint = if image_only { "Lägg till en bildtext…" } else { "Skriv… markdown fungerar, Ctrl+E förhandsvisar." };
+            let hint = if image_only { t::CAPTION_HINT } else { t::EDITOR_HINT_MAIN };
             egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
                 ed.editor(ui, hint);
             });
@@ -789,7 +810,10 @@ impl App {
             return;
         }
         if commit {
-            ed.commit_name(&self.db);
+            // Enter applies the name and returns to the text; Tab / a click go where the user went.
+            if ed.commit_name(&self.db) && ui.input(|i| i.key_pressed(Key::Enter)) {
+                ed.focus = true;
+            }
             self.main.stale = true;
         }
         if discard {

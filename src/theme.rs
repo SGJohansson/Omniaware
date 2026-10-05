@@ -27,6 +27,10 @@ pub fn install(ctx: &egui::Context, size: f32) {
         Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"))),
     );
     fonts.font_data.insert(
+        "jbm-bold".into(),
+        Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf"))),
+    );
+    fonts.font_data.insert(
         "jbm-medium".into(),
         Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/JetBrainsMono-Medium.ttf"))),
     );
@@ -34,7 +38,8 @@ pub fn install(ctx: &egui::Context, size: f32) {
         fonts.families.entry(fam).or_default().insert(0, "jbm".into());
     }
     let fallback = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
-    fonts.families.insert(medium(), std::iter::once("jbm-medium".to_string()).chain(fallback).collect());
+    fonts.families.insert(medium(), std::iter::once("jbm-medium".to_string()).chain(fallback.clone()).collect());
+    fonts.families.insert(crate::markup::bold_family(), std::iter::once("jbm-bold".to_string()).chain(fallback).collect());
     ctx.set_fonts(fonts);
 
     let mut v = egui::Visuals::dark();
@@ -98,85 +103,23 @@ pub fn hotkey_caps(spec: &str) -> Vec<String> {
         .collect()
 }
 
-const WD_SHORT: [&str; 7] = ["mån", "tis", "ons", "tor", "fre", "lör", "sön"];
-const WD_LONG: [&str; 7] = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"];
-const MONTHS: [&str; 12] = [
-    "januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november",
-    "december",
-];
+use crate::text::{self as t, Group};
 
 pub fn month_name(m: u32) -> &'static str {
-    MONTHS[(m as usize).saturating_sub(1) % 12]
+    t::MONTHS[(m as usize).saturating_sub(1) % 12]
 }
 
-/// "sön 4 okt"
+/// "Mon 5 Oct"
 pub fn day_short(d: NaiveDate) -> String {
     let m: String = month_name(d.month()).chars().take(3).collect();
-    format!("{} {} {}", WD_SHORT[d.weekday().num_days_from_monday() as usize], d.day(), m)
+    format!("{} {} {}", t::WD_SHORT[d.weekday().num_days_from_monday() as usize], d.day(), m)
 }
 
-/// "Söndag 4 oktober" (+ year if not current)
+/// "Monday 5 October" (+ year if not the current one)
 pub fn day_long(d: NaiveDate, today: NaiveDate) -> String {
-    let base = format!(
-        "{} {} {}",
-        WD_LONG[d.weekday().num_days_from_monday() as usize],
-        d.day(),
-        month_name(d.month())
-    );
+    let base = format!("{} {} {}", t::WD_LONG[d.weekday().num_days_from_monday() as usize], d.day(), month_name(d.month()));
     if d.year() == today.year() { base } else { format!("{base} {}", d.year()) }
 }
-
-/// Keycaps + description.
-pub type Row = (&'static [&'static str], &'static str);
-pub type Group = (&'static str, &'static [Row]);
-
-const GLOBAL: &[Row] = &[
-    (&["Ctrl", "C", "C"], "tyst fångst"),
-    (&["Ctrl", "Alt", "O"], "ruta → vidga → stäng"),
-];
-const IMAGES: &[Row] = &[
-    (&["Klick"], "markera"),
-    (&["Ctrl", "Klick"], "markera flera"),
-    (&["Dubbelklick"], "förstora"),
-    (&["Högerklick"], "meny"),
-    (&["Delete"], "ta bort markerade"),
-];
-
-pub const CAPTURE_KEYS: &[Group] = &[
-    (
-        "Snabbruta",
-        &[
-            (&["Esc"], "spara och stäng"),
-            (&["Ctrl", "S"], "spara version"),
-            (&["F2"], "namnge"),
-            (&["Ctrl", "V"], "klistra in bild"),
-            (&["Ctrl", "Alt", "O"], "vidga"),
-            (&["Shift", "Esc"], "kasta"),
-        ],
-    ),
-    ("Bilder", IMAGES),
-    ("Globalt", GLOBAL),
-];
-
-pub const MAIN_KEYS: &[Group] = &[
-    (
-        "Tidslinje",
-        &[(&["←", "→"], "dag"), (&["T"], "idag"), (&["Ctrl", "N"], "nytt inlägg"), (&["Ctrl", "K"], "sök")],
-    ),
-    (
-        "Inlägg",
-        &[
-            (&["Ctrl", "S"], "spara version"),
-            (&["F2"], "namnge"),
-            (&["Ctrl", "E"], "förhandsvisa"),
-            (&["Ctrl", "V"], "klistra in bild"),
-            (&["Esc"], "tillbaka"),
-        ],
-    ),
-    ("Sök", &[(&["↑", "↓"], "välj"), (&["Enter"], "öppna"), (&["Shift", "Enter"], "klistra in")]),
-    ("Bilder", IMAGES),
-    ("Globalt", GLOBAL),
-];
 
 /// Grouped shortcut list (keycaps column + description column).
 pub fn shortcut_groups(ui: &mut Ui, groups: &[Group]) {
@@ -307,7 +250,7 @@ pub fn open_url(url: &str) {
         std::process::Command::new("xdg-open").arg(url).spawn()
     };
     if let Err(e) = r {
-        crate::log::error(format!("öppna {url}: {e}"));
+        crate::log::error(format!("open {url}: {e}"));
     }
 }
 
@@ -340,13 +283,13 @@ pub fn key_button(ui: &mut Ui, keys: &[&str], label: &str) -> egui::Response {
 
 /// What the status dot's colours mean (shown in the shortcut overlays).
 pub fn status_legend(ui: &mut Ui) {
-    ui.label(RichText::new("Statusprick").family(medium()).size(12.5).color(ACCENT));
+    ui.label(RichText::new(t::LEGEND_TITLE).family(medium()).size(12.5).color(ACCENT));
     ui.add_space(2.0);
     for (c, what) in [
-        (WEAK, "tomt – inget att spara"),
-        (OK, "sparat på disk"),
-        (WARN, "väntar på sparning"),
-        (ERR, "fel – se loggen"),
+        (WEAK, t::LEGEND_EMPTY),
+        (OK, t::LEGEND_SAVED),
+        (WARN, t::LEGEND_WAITING),
+        (ERR, t::LEGEND_ERROR),
     ] {
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
@@ -354,6 +297,6 @@ pub fn status_legend(ui: &mut Ui) {
             ui.label(RichText::new(what).color(WEAK).size(12.0));
         });
     }
-    ui.label(RichText::new("En ring = något sparades just nu.").color(FAINT).size(11.0));
+    ui.label(RichText::new(t::LEGEND_RING).color(FAINT).size(11.0));
     ui.add_space(10.0);
 }

@@ -10,9 +10,9 @@ pub struct Tray {
 
 pub fn build() -> Result<Tray, Box<dyn std::error::Error>> {
     let menu = Menu::new();
-    let capture = MenuItem::new("Snabbanteckning", true, None);
-    let main = MenuItem::new("Öppna Omniaware", true, None);
-    let quit = MenuItem::new("Avsluta", true, None);
+    let capture = MenuItem::new(crate::text::TRAY_CAPTURE, true, None);
+    let main = MenuItem::new(crate::text::TRAY_MAIN, true, None);
+    let quit = MenuItem::new(crate::text::TRAY_QUIT, true, None);
     menu.append_items(&[&capture, &main, &PredefinedMenuItem::separator(), &quit])?;
     let icon = TrayIconBuilder::new()
         .with_menu(Box::new(menu))

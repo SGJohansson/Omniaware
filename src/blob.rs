@@ -10,7 +10,7 @@ pub fn path_for(data_dir: &Path, hash: &str, ext: &str) -> PathBuf {
 pub fn store_rgba(data_dir: &Path, w: u32, h: u32, rgba: &[u8]) -> Result<String, String> {
     let mut px = rgba.to_vec();
     opaque_if_alpha_missing(&mut px);
-    let img = image::RgbaImage::from_raw(w, h, px).ok_or("ogiltig bildbuffert")?;
+    let img = image::RgbaImage::from_raw(w, h, px).ok_or("invalid image buffer")?;
     let mut png = Vec::new();
     img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
         .map_err(|e| e.to_string())?;
@@ -20,7 +20,7 @@ pub fn store_rgba(data_dir: &Path, w: u32, h: u32, rgba: &[u8]) -> Result<String
     if path.exists() {
         return Ok(hash);
     }
-    let dir = path.parent().ok_or("ogiltig sökväg")?;
+    let dir = path.parent().ok_or("invalid path")?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("tmp");
     let write = || -> std::io::Result<()> {

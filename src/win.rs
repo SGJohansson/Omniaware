@@ -262,10 +262,10 @@ mod imp {
                 None,
             ) {
                 Ok(h) => h,
-                Err(e) => return crate::log::error(format!("urklippslyssnare: {e}")),
+                Err(e) => return crate::log::error(format!("clipboard listener: {e}")),
             };
             if let Err(e) = AddClipboardFormatListener(hwnd) {
-                return crate::log::error(format!("urklippslyssnare: {e}"));
+                return crate::log::error(format!("clipboard listener: {e}"));
             }
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {

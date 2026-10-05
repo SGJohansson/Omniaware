@@ -1,6 +1,7 @@
 //! Capture popup UI (Ctrl+Alt+O / tray click).
 
 use crate::app::App;
+use crate::text as t;
 use crate::theme;
 use egui::{Align, Id, Key, Layout, Margin, Modifiers, RichText, Sense, TextEdit, ViewportCommand};
 
@@ -8,6 +9,17 @@ enum Action {
     None,
     Save,
     Discard,
+}
+
+/// How the name field was left.
+#[derive(Clone, Copy, PartialEq)]
+enum NameDone {
+    /// Enter: apply, back to the text (or stay put on a name clash).
+    Enter,
+    /// Tab or a click elsewhere: apply, focus goes wherever the user went.
+    Leave,
+    /// Ctrl+Enter: apply and close the popup.
+    Close,
 }
 
 /// Clicks in the footer key row.
@@ -50,6 +62,7 @@ impl App {
             }
         } else if !self.capture_naming && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F2)) {
             self.capture_naming = true;
+            self.capture_name_focus = true;
         } else if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::S)) {
             if let Some(d) = self.capture.as_mut() {
                 d.save_now(&self.db);
@@ -77,11 +90,11 @@ impl App {
                 ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
             }
             ui.horizontal(|ui| {
-                    ui.label(RichText::new("Snabbanteckning").family(theme::medium()));
+                    ui.label(RichText::new(t::QUICK_NOTE).family(theme::medium()));
                     let dest = match (&doc.saved_name, naming) {
-                        (Some(n), _) => format!("→ Namngivna · {n}"),
-                        (None, true) => "→ Namngivna".to_string(),
-                        (None, false) => format!("→ Journal · {}", theme::day_short(today)),
+                        (Some(n), _) => t::dest_named(Some(n)),
+                        (None, true) => t::dest_named(None),
+                        (None, false) => t::dest_journal(&theme::day_short(today)),
                     };
                     ui.label(RichText::new(dest).color(theme::WEAK).size(12.0));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -102,10 +115,10 @@ impl App {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 14.0;
                 let keys: [(&[&str], &str, Foot); 4] = [
-                    (&["esc"], "spara", Foot::Save),
-                    (&["F2"], "namnge", Foot::Name),
-                    (&["ctrl", "s"], "version", Foot::Version),
-                    (&["ctrl", "alt", "o"], "vidga", Foot::Expand),
+                    (&["esc"], t::FOOT_SAVE, Foot::Save),
+                    (&["F2"], t::FOOT_NAME, Foot::Name),
+                    (&["ctrl", "s"], t::FOOT_VERSION, Foot::Version),
+                    (&["ctrl", "alt", "o"], t::FOOT_EXPAND, Foot::Expand),
                 ];
                 for (k, label, f) in keys {
                     if theme::key_button(ui, k, label).clicked() {
@@ -113,7 +126,7 @@ impl App {
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if theme::key_button(ui, &["F1"], "alla genvägar").on_hover_text("Klicka eller håll F1").clicked() {
+                    if theme::key_button(ui, &["F1"], t::FOOT_ALL).on_hover_text(t::TIP_F1).clicked() {
                         foot = Some(Foot::Help);
                     }
                 });
@@ -121,35 +134,44 @@ impl App {
         });
 
         // ---- body ----
-        let mut confirm = false;
+        let mut name_done: Option<NameDone> = None;
+        let focus_name = std::mem::take(&mut self.capture_name_focus);
         egui::CentralPanel::default().frame(bar(theme::BG, 12, 6)).show(ui, |ui| {
             if naming {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Namn").color(theme::WEAK));
+                    ui.label(RichText::new(t::NAME_LABEL).color(theme::WEAK));
                     let r = ui.add(
                         TextEdit::singleline(&mut doc.name)
                             .id(Id::new("cap_name"))
-                            .desired_width(280.0)
-                            .hint_text("adress-jobb"),
+                            .desired_width(240.0)
+                            .hint_text(t::NAME_HINT),
                     );
-                    if !r.has_focus() && doc.name_msg.is_none() && !r.lost_focus() {
+                    if focus_name {
                         r.request_focus();
                     }
                     if r.changed() {
                         doc.name_takeover = None;
                         doc.name_msg = None;
                     }
-                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        confirm = true;
+                    // Enter / Tab / a click elsewhere apply the name and keep the note open;
+                    // Ctrl+Enter applies it and closes. (Esc is handled above and cancels.)
+                    if r.has_focus() && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter)) {
+                        name_done = Some(NameDone::Close);
+                    } else if r.lost_focus() {
+                        let enter = ui.input(|i| i.key_pressed(Key::Enter));
+                        name_done = Some(if enter { NameDone::Enter } else { NameDone::Leave });
                     }
-                    ui.label(RichText::new("Enter sparar · Esc avbryter").color(theme::WEAK).size(12.0));
+                    theme::key_hint(ui, &["enter"]);
+                    ui.label(RichText::new(t::NAME_BACK).color(theme::WEAK).size(11.0));
+                    theme::key_hint(ui, &["ctrl", "enter"]);
+                    ui.label(RichText::new(t::NAME_CLOSE).color(theme::WEAK).size(11.0));
                 });
                 if let Some(m) = &doc.name_msg {
                     ui.label(RichText::new(m).color(theme::WARN).size(12.0));
                 }
                 ui.add_space(4.0);
             }
-            doc.editor(ui, "Skriv eller klistra in…");
+            doc.editor(ui, t::EDITOR_HINT);
         });
 
         if show_help {
@@ -165,9 +187,9 @@ impl App {
                         .show(ui, |ui| {
                             ui.set_min_width(540.0);
                             ui.columns(2, |c| {
-                                theme::shortcut_groups(&mut c[0], &theme::CAPTURE_KEYS[..1]);
+                                theme::shortcut_groups(&mut c[0], &t::CAPTURE_KEYS[..1]);
                                 theme::status_legend(&mut c[0]);
-                                theme::shortcut_groups(&mut c[1], &theme::CAPTURE_KEYS[1..]);
+                                theme::shortcut_groups(&mut c[1], &t::CAPTURE_KEYS[1..]);
                             });
                         });
                 });
@@ -176,7 +198,10 @@ impl App {
             Some(Foot::Help) => self.capture_help = !self.capture_help,
             Some(Foot::Save) => return self.finish_capture(&ctx, false),
             Some(Foot::Expand) => return self.open_main(&ctx),
-            Some(Foot::Name) => self.capture_naming = true,
+            Some(Foot::Name) => {
+                self.capture_naming = true;
+                self.capture_name_focus = true;
+            }
             Some(Foot::Version) => {
                 if let Some(d) = self.capture.as_mut() {
                     d.save_now(&self.db);
@@ -187,13 +212,21 @@ impl App {
         if let Some(a) = img_act {
             self.image_action(a);
         }
-        if confirm {
+        if let Some(how) = name_done {
             let ok = self.capture.as_mut().is_some_and(|d| d.commit_name(&self.db));
             if ok {
                 self.capture_naming = false;
-                self.finish_capture(&ctx, false);
-            } else {
-                ctx.memory_mut(|m| m.request_focus(Id::new("cap_name")));
+                if how == NameDone::Close {
+                    return self.finish_capture(&ctx, false);
+                }
+                if let Some(d) = self.capture.as_mut()
+                    && how == NameDone::Enter
+                {
+                    d.focus = true;
+                }
+            } else if how != NameDone::Leave {
+                // Name clash: keep the field so a second Enter can move the name here.
+                self.capture_name_focus = true;
             }
         }
     }
