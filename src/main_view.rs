@@ -75,6 +75,29 @@ fn date_of(ms: i64) -> Option<NaiveDate> {
 }
 
 /// Clickable full-width row painted directly (time | glyph | name chip | preview).
+const META_W: f32 = 132.0;
+
+/// "2 bilder │ 312 kB" (unique files, so copies add nothing) or "48 ord".
+fn row_meta(ui: &Ui, dir: &std::path::Path, it: &Item) -> std::sync::Arc<egui::Galley> {
+    let (acc, dim, faint) = (theme::ACCENT, theme::WEAK, theme::FAINT);
+    if it.blobs.is_empty() {
+        let n = it.words.to_string();
+        return if it.words == 0 { theme::runs(ui, &[("–", faint)], 11.0) } else { theme::runs(ui, &[(&n, acc), (" ord", dim)], 11.0) };
+    }
+    let mut seen = std::collections::HashSet::new();
+    let bytes: u64 = it
+        .blobs
+        .iter()
+        .filter(|b| seen.insert(b.as_str()))
+        .filter_map(|b| crate::doc::meta(dir, b))
+        .map(|m| m.bytes)
+        .sum();
+    let n = it.blobs.len();
+    let (v, u) = crate::doc::fmt_size(bytes);
+    let cnt = n.to_string();
+    theme::runs(ui, &[(&cnt, acc), (if n == 1 { " bild" } else { " bilder" }, dim), (" │ ", faint), (&v, acc), (" ", dim), (u, dim)], 11.0)
+}
+
 fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool) -> egui::Response {
     let time_w = if time.len() > 5 { 92.0 } else { 52.0 };
     let h = 32.0;
@@ -100,12 +123,6 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool
             .paint_at(ui, tr);
         ui.painter().rect_stroke(tr, 3.0, egui::Stroke::new(1.0, theme::LINE), egui::StrokeKind::Outside);
         text_right = tr.left() - 8.0;
-        if it.images > 1 {
-            let p = ui.painter();
-            let badge = format!("+{}", it.images - 1);
-            p.text(egui::pos2(text_right, rect.center().y), Align2::RIGHT_CENTER, badge, FontId::monospace(11.0), theme::WEAK);
-            text_right -= 28.0;
-        }
     }
     let clip = egui::Rect::from_min_max(rect.min, egui::pos2(text_right, rect.max.y));
     let p = ui.painter_at(clip);
@@ -116,6 +133,10 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool
     let cy = rect.center().y;
     p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, time, small.clone(), theme::WEAK);
     x += time_w;
+    // Summary column: images and their size on disk, or the word count for text-only entries.
+    let meta = row_meta(ui, dir, it);
+    p.galley(egui::pos2(x, cy - meta.size().y / 2.0), meta, theme::WEAK);
+    x += META_W;
     let glyph = if it.is_event { "◆" } else if it.name.is_some() { "#" } else { "·" };
     p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, glyph, font.clone(), if it.is_event { theme::ACCENT } else { theme::WEAK });
     x += 20.0;
@@ -130,8 +151,8 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool
     let (text, col) = match (it.preview.is_empty(), it.images) {
         (false, _) => (it.preview.clone(), fg),
         (true, 0) => ("(tomt)".to_string(), theme::WEAK),
-        (true, 1) => ("Bild".to_string(), theme::WEAK),
-        (true, n) => (format!("{n} bilder"), theme::WEAK),
+        (true, 1) => ("bild".to_string(), theme::WEAK),
+        (true, _) => ("bilder".to_string(), theme::WEAK),
     };
     p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, text, font, col);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -320,6 +341,7 @@ impl App {
                     ui.add_space(8.0);
                     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                         theme::shortcut_groups(ui, theme::MAIN_KEYS);
+                        theme::status_legend(ui);
                     });
                 } else {
                     // Whole strip is the tab; vertical label reads bottom-to-top.

@@ -17,7 +17,7 @@ mod imp {
     use windows::Win32::System::Threading::{AttachThreadInput, CreateMutexW, GetCurrentThreadId};
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, INPUT, SetFocus, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
+        GetAsyncKeyState, GetFocus, INPUT, SetFocus, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
         VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -108,7 +108,9 @@ mod imp {
 
     /// Foreground + keyboard focus. Borrows the input queue of the current foreground thread
     /// instead of faking an Alt tap (winit's fallback), which can leave the previous app in
-    /// menu mode where every key press dings. Returns whether we are in front now.
+    /// menu mode where every key press dings. Returns whether we are in front *and* hold the
+    /// keyboard focus: an active window without focus gets every key as WM_SYSCHAR, which
+    /// Windows answers with the alert sound (and egui hides the caret).
     pub fn activate(h: isize) -> bool {
         if h == 0 {
             return false;
@@ -117,7 +119,10 @@ mod imp {
             let wnd = hwnd(h);
             let fg = GetForegroundWindow();
             if fg == wnd {
-                return true;
+                if GetFocus() != wnd {
+                    let _ = SetFocus(Some(wnd));
+                }
+                return GetFocus() == wnd;
             }
             let me = GetCurrentThreadId();
             let other = if fg.is_invalid() { 0 } else { GetWindowThreadProcessId(fg, None) };
@@ -128,7 +133,7 @@ mod imp {
             if attached {
                 let _ = AttachThreadInput(me, other, false);
             }
-            GetForegroundWindow() == wnd
+            GetForegroundWindow() == wnd && GetFocus() == wnd
         }
     }
 

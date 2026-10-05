@@ -149,7 +149,9 @@ impl Doc {
             Ok(()) => {
                 self.dirty = false;
                 if self.id.is_some() {
-                    self.mark_saved(false);
+                    // The first save (grey → green) gets the same ring as an image paste.
+                    let first = !matches!(self.status, Status::Saved(_) | Status::Clean);
+                    self.mark_saved(first);
                 }
             }
             Err(e) => self.fail(format!("sparning: {e}")),
@@ -314,7 +316,7 @@ impl Doc {
     }
 
     /// Save bookkeeping. Routine text autosaves stay silent; `pulse` (one ring on the dot)
-    /// is reserved for things the user did on purpose: Ctrl+S, adding or removing an image.
+    /// is reserved for the first save and things done on purpose: Ctrl+S, adding or removing an image.
     fn mark_saved(&mut self, pulse: bool) {
         self.status = Status::Saved(chrono::Local::now().format("%H:%M:%S").to_string());
         if pulse {
@@ -658,7 +660,10 @@ pub fn image_tile(
         } else {
             // corner badge (variant B): W×H · size
             let f = theme::FAINT;
-            let g = runs(ui, &[(&w, acc), ("×", txt), (&h, acc), (" │ ", f), (&sv, acc), (" ", dim), (su, dim)], 10.0);
+            let mut g = runs(ui, &[(&w, acc), ("×", txt), (&h, acc), (" │ ", f), (&sv, acc), (" ", dim), (su, dim)], 10.0);
+            if g.size().x > r.width() - 20.0 {
+                g = runs(ui, &[(&sv, acc), (" ", dim), (su, dim)], 10.0); // narrow (tall) tile: size only
+            }
             let badge = egui::Rect::from_min_size(r.right_bottom() - g.size() - egui::vec2(15.0, 9.0), g.size() + egui::vec2(10.0, 4.0));
             p.rect_filled(badge, 3.0, SHADE);
             p.galley(badge.min + egui::vec2(5.0, 2.0), g, txt);

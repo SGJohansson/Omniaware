@@ -98,6 +98,10 @@ pub struct Item {
     pub images: usize,
     /// First attached image ref, for the row thumbnail.
     pub thumb: Option<String>,
+    /// Every attached image ref (copies included), in order.
+    pub blobs: Vec<String>,
+    /// Words in the text body.
+    pub words: usize,
     /// Display time: `starts` for events in range, else `created` (or `updated`/`deleted` for lists).
     pub time: i64,
     pub is_event: bool,
@@ -145,7 +149,8 @@ pub fn blob_refs(body: &str) -> Vec<String> {
 
 /// Columns 5 and 6 of every list query: attachment count and first attachment.
 const ATT_COLS: &str = "(SELECT count(*) FROM attachment a WHERE a.entry_id = e.id),
-     (SELECT a.blob FROM attachment a WHERE a.entry_id = e.id ORDER BY a.pos LIMIT 1)";
+     (SELECT a.blob FROM attachment a WHERE a.entry_id = e.id ORDER BY a.pos LIMIT 1),
+     (SELECT group_concat(a.blob, ',') FROM attachment a WHERE a.entry_id = e.id)";
 
 fn item_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item> {
     let body: String = r.get(2)?;
@@ -155,6 +160,11 @@ fn item_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item> {
         preview: preview_of(&body),
         images: r.get::<_, i64>(5)? as usize,
         thumb: r.get(6)?,
+        blobs: r
+            .get::<_, Option<String>>(7)?
+            .map(|s| s.split(',').map(str::to_string).collect())
+            .unwrap_or_default(),
+        words: body.split_whitespace().filter(|w| !w.starts_with("![](")).count(),
         time: r.get(3)?,
         is_event: r.get::<_, i64>(4)? != 0,
     })

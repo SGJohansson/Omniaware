@@ -278,14 +278,22 @@ pub fn info_chip(ui: &mut Ui, w: u32, h: u32, size: (&str, &str), font: f32) {
     ui.painter().galley(rect.min, g, TEXT);
 }
 
-/// Small "voidflow.tech ↗" link; returns true when clicked.
+/// voidflow badge + "voidflow.tech ↗"; the whole row is the link. Returns true when clicked.
 pub fn site_link(ui: &mut Ui) -> bool {
+    let icon = egui::Image::from_bytes("bytes://voidflow.png", include_bytes!("../assets/brand/voidflow.png"))
+        .fit_to_exact_size(egui::vec2(20.0, 20.0));
     let r = ui
-        .add(egui::Label::new(RichText::new("voidflow.tech ↗").size(11.0).color(FAINT)).sense(egui::Sense::click()))
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.add(icon);
+            ui.label(RichText::new("voidflow.tech ↗").size(11.0).color(FAINT));
+        })
+        .response
+        .interact(egui::Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(SITE_URL);
     if r.hovered() {
-        let x = egui::Rangef::new(r.rect.left(), r.rect.right());
+        let x = egui::Rangef::new(r.rect.left() + 26.0, r.rect.right());
         ui.painter().hline(x, r.rect.bottom(), Stroke::new(1.0, ACCENT.gamma_multiply(0.6)));
     }
     r.clicked()
@@ -301,4 +309,51 @@ pub fn open_url(url: &str) {
     if let Err(e) = r {
         crate::log::error(format!("öppna {url}: {e}"));
     }
+}
+
+/// Clickable shortcut: mini keycaps + a short label, painted as one unit (hover lights it up).
+pub fn key_button(ui: &mut Ui, keys: &[&str], label: &str) -> egui::Response {
+    let font = egui::FontId::monospace(10.0);
+    let lab_font = egui::FontId::monospace(11.0);
+    let caps: Vec<_> = keys.iter().map(|k| ui.fonts_mut(|f| f.layout_no_wrap(k.to_string(), font.clone(), WEAK))).collect();
+    let lab = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), lab_font.clone(), WEAK));
+    let (pad, gap, h) = (4.0, 3.0, 17.0);
+    let caps_w: f32 = caps.iter().map(|g| g.size().x + 2.0 * pad + gap).sum();
+    let size = egui::vec2(caps_w + 3.0 + lab.size().x + 4.0, h);
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    let hot = resp.hovered();
+    let p = ui.painter();
+    if hot {
+        p.rect_filled(rect.expand2(egui::vec2(3.0, 1.0)), 4.0, Color32::from_rgb(30, 32, 36));
+    }
+    let mut x = rect.left();
+    for g in caps {
+        let r = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 1.0), egui::vec2(g.size().x + 2.0 * pad, h - 2.0));
+        p.rect(r, 3.0, BG_SIDE, Stroke::new(1.0, if hot { ACCENT_DIM } else { Color32::from_rgb(52, 55, 62) }), egui::StrokeKind::Inside);
+        p.galley(egui::pos2(r.left() + pad, r.center().y - g.size().y / 2.0), g, if hot { TEXT } else { WEAK });
+        x = r.right() + gap;
+    }
+    let lab_col = if hot { TEXT } else { Color32::from_rgb(104, 108, 116) };
+    p.galley(egui::pos2(x + 3.0, rect.center().y - lab.size().y / 2.0), lab, lab_col);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// What the status dot's colours mean (shown in the shortcut overlays).
+pub fn status_legend(ui: &mut Ui) {
+    ui.label(RichText::new("Statusprick").family(medium()).size(12.5).color(ACCENT));
+    ui.add_space(2.0);
+    for (c, what) in [
+        (WEAK, "tomt – inget att spara"),
+        (OK, "sparat på disk"),
+        (WARN, "väntar på sparning"),
+        (ERR, "fel – se loggen"),
+    ] {
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+            ui.painter().circle_filled(r.center(), 4.0, c);
+            ui.label(RichText::new(what).color(WEAK).size(12.0));
+        });
+    }
+    ui.label(RichText::new("En ring = något sparades just nu.").color(FAINT).size(11.0));
+    ui.add_space(10.0);
 }

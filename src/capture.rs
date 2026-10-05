@@ -1,4 +1,4 @@
-//! Capture popup UI (Win+Alt+V / tray click).
+//! Capture popup UI (Ctrl+Alt+O / tray click).
 
 use crate::app::App;
 use crate::theme;
@@ -8,6 +8,16 @@ enum Action {
     None,
     Save,
     Discard,
+}
+
+/// Clicks in the footer key row.
+#[derive(Clone, Copy)]
+enum Foot {
+    Save,
+    Name,
+    Version,
+    Expand,
+    Help,
 }
 
 fn bar(fill: egui::Color32, x: i8, y: i8) -> egui::Frame {
@@ -53,7 +63,7 @@ impl App {
 
         let naming = self.capture_naming;
         let show_help = self.capture_help || ctx.input(|i| i.key_down(Key::F1));
-        let mut toggle_help = false;
+        let mut foot: Option<Foot> = None;
         let dir = self.dir.clone();
         let today = chrono::Local::now().date_naive();
         let Some(doc) = self.capture.as_mut() else { return };
@@ -76,23 +86,39 @@ impl App {
                     ui.label(RichText::new(dest).color(theme::WEAK).size(12.0));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         doc.indicator(ui);
-                        let q = ui
-                            .add(egui::Button::new(RichText::new("?").size(12.0).color(theme::WEAK)).frame(false))
-                            .on_hover_text("Genvägar (håll F1)");
-                        toggle_help = q.clicked();
                     });
                 })
 ;
         });
 
-        // ---- footer: images only (shortcuts live behind "?" / F1) ----
-        if !doc.images.is_empty() {
-            egui::Panel::bottom("cap_ftr").frame(bar(theme::BG, 12, 8)).show(ui, |ui| {
+        // ---- footer: images (if any) + one slim row of clickable shortcuts ----
+        egui::Panel::bottom("cap_ftr").frame(bar(theme::BG, 12, 7)).show(ui, |ui| {
+            if !doc.images.is_empty() {
                 if let Some(a) = doc.thumbs(ui, &dir, crate::doc::THUMB) {
                     img_act = Some(a);
                 }
+                ui.add_space(6.0);
+            }
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 14.0;
+                let keys: [(&[&str], &str, Foot); 4] = [
+                    (&["esc"], "spara", Foot::Save),
+                    (&["F2"], "namnge", Foot::Name),
+                    (&["ctrl", "s"], "version", Foot::Version),
+                    (&["ctrl", "alt", "o"], "vidga", Foot::Expand),
+                ];
+                for (k, label, f) in keys {
+                    if theme::key_button(ui, k, label).clicked() {
+                        foot = Some(f);
+                    }
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if theme::key_button(ui, &["F1"], "alla genvägar").on_hover_text("Klicka eller håll F1").clicked() {
+                        foot = Some(Foot::Help);
+                    }
+                });
             });
-        }
+        });
 
         // ---- body ----
         let mut confirm = false;
@@ -140,13 +166,23 @@ impl App {
                             ui.set_min_width(540.0);
                             ui.columns(2, |c| {
                                 theme::shortcut_groups(&mut c[0], &theme::CAPTURE_KEYS[..1]);
+                                theme::status_legend(&mut c[0]);
                                 theme::shortcut_groups(&mut c[1], &theme::CAPTURE_KEYS[1..]);
                             });
                         });
                 });
         }
-        if toggle_help {
-            self.capture_help = !self.capture_help;
+        match foot {
+            Some(Foot::Help) => self.capture_help = !self.capture_help,
+            Some(Foot::Save) => return self.finish_capture(&ctx, false),
+            Some(Foot::Expand) => return self.open_main(&ctx),
+            Some(Foot::Name) => self.capture_naming = true,
+            Some(Foot::Version) => {
+                if let Some(d) = self.capture.as_mut() {
+                    d.save_now(&self.db);
+                }
+            }
+            None => {}
         }
         if let Some(a) = img_act {
             self.image_action(a);

@@ -202,13 +202,15 @@ impl App {
         }
         // No ViewportCommand::Focus: winit's fallback for it fakes an Alt tap (see win::activate).
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-        self.focus_until = Some(std::time::Instant::now() + std::time::Duration::from_millis(600));
+        self.focus_until = Some(std::time::Instant::now() + std::time::Duration::from_millis(1500));
     }
 
     /// Retries activation for a short while after showing; until then keys may go to the app behind.
     fn ensure_focus(&mut self, ctx: &egui::Context) {
         let Some(until) = self.focus_until else { return };
-        if win::activate(self.hwnd) || std::time::Instant::now() > until {
+        // Done once Windows says we are in front with focus and winit/egui has seen it too.
+        let ok = win::activate(self.hwnd) && ctx.input(|i| i.focused);
+        if ok || std::time::Instant::now() > until {
             self.focus_until = None;
         } else {
             ctx.request_repaint_after(std::time::Duration::from_millis(40));
