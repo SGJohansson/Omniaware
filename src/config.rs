@@ -31,6 +31,8 @@ pub struct WindowCfg {
     pub font_size: f32,
     pub main_width: f32,
     pub main_height: f32,
+    /// Shortcut side panel open in the main window.
+    pub shortcuts: bool,
 }
 
 impl Default for Config {
@@ -45,7 +47,7 @@ impl Default for Hotkeys {
 }
 impl Default for WindowCfg {
     fn default() -> Self {
-        Self { width: 640.0, height: 420.0, font_size: 14.0, main_width: 1040.0, main_height: 700.0 }
+        Self { width: 640.0, height: 420.0, font_size: 14.0, main_width: 1040.0, main_height: 700.0, shortcuts: false }
     }
 }
 
@@ -93,6 +95,13 @@ pub fn load(dir: &Path) -> Config {
             }
             cfg
         }
+    }
+}
+
+/// Writes config.toml (used for small UI preferences such as the shortcut panel).
+pub fn save(dir: &Path, cfg: &Config) {
+    if let Ok(s) = toml::to_string_pretty(cfg) {
+        let _ = std::fs::write(dir.join("config.toml"), s);
     }
 }
 

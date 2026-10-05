@@ -11,8 +11,8 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 - **Silent capture** — press `Ctrl+C` twice in quick succession and the clipboard (text or image) is saved straight to today's journal. The tray icon briefly turns green; nothing else interrupts you.
 - **One key for everything else** — `Ctrl+Alt+O` opens a small capture window pre-filled with the clipboard. Press it again and the same note expands into the main window: a day-by-day timeline, a month calendar marking days with content, named entries and a recycle bin. Press it a third time to put everything away.
 - **Full-text search** — `Ctrl+K` searches everything. `Shift+Enter` pastes the result straight into the window you came from.
-- **Markdown and images** — entries are plain Markdown text with a rendered preview (`Ctrl+E`). Pasted images are kept as attachments shown above the text; an image-only entry is displayed full size with the text as its caption. Click to select (`Ctrl`+click for several, `Delete` removes), double-click to enlarge, right-click to copy, save, open with another program or show the file in Explorer.
-- **Named snippets** — give an entry a name (`Ctrl+S`) and it becomes a reusable snippet, much like an AutoHotkey text store.
+- **Markdown and images** — entries are plain Markdown text with a rendered preview (`Ctrl+E`). Pasted images are kept as attachments shown above the text; an image-only entry is displayed full size with the text as its caption. Every image is numbered and shows its dimensions and file size; hover for the full details. Pasting a picture that is already attached asks before adding it as a copy (the file is shared, not duplicated). Click to select (`Ctrl`+click for several, `Delete` removes), double-click to enlarge, right-click to copy, save, open with another program or show the file in Explorer.
+- **Named snippets** — give an entry a name (`F2`) and it becomes a reusable snippet, much like an AutoHotkey text store.
 - **Crash-safe by design** — see [Data and durability](#data-and-durability).
 
 ## Keyboard shortcuts
@@ -32,7 +32,9 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 | `Esc` | Save and close (empty entries are discarded) |
 | `Ctrl+Alt+O` | Keep the note and expand to the main window |
 | `Shift+Esc` | Move to the recycle bin |
-| `Ctrl+S` | Name the entry. If the name is taken, `Enter` again moves the name here; the previous entry is kept, unnamed |
+| `Ctrl+S` | Save a version now |
+| `F2` | Name the entry. If the name is taken, `Enter` again moves the name here; the previous entry is kept, unnamed |
+| `F1` (hold) or `?` | Show shortcuts |
 | `Ctrl+V` | Paste text or an image |
 
 **Main window**
@@ -43,6 +45,8 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 | `Ctrl+K` | Search. `Enter` opens, `Shift+Enter` pastes into the previous window |
 | `Ctrl+N` | New entry |
 | `Ctrl+E` | Toggle edit / preview |
+| `Ctrl+S` / `F2` | Save a version / name the entry |
+| `F1` | Show or hide the shortcut panel |
 | `Esc` | Back, then close |
 
 Shortcuts can be changed in `config.toml`.
@@ -81,7 +85,7 @@ Everything lives locally in `%APPDATA%\Omniaware\` (override with the `OMNIAWARE
 How it avoids losing data:
 
 - The clipboard is written to the database **before** the capture window is even shown.
-- Edits are saved 300 ms after the last keystroke, in SQLite WAL mode with `synchronous=FULL` (every commit is flushed to disk).
+- Edits are saved 300 ms after the last keystroke (a short pulse on the status dot), in SQLite WAL mode with `synchronous=FULL` (every commit is flushed to disk).
 - A revision snapshot is kept each time an entry is closed.
 - Images are written to a temporary file, flushed and then atomically renamed.
 - Deleting moves entries to a recycle bin; permanent removal requires a second confirmation.

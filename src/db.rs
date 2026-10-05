@@ -77,7 +77,16 @@ pub struct Entry {
     pub body: String,
     pub created: i64,
     pub starts: Option<i64>,
-    pub images: Vec<String>,
+    pub images: Vec<Img>,
+}
+
+/// One image attached to an entry. The same blob may appear several times (deliberate copies).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Img {
+    /// Attachment row id (stable handle for selection/removal).
+    pub id: i64,
+    /// Blob ref "<hash>.<ext>".
+    pub blob: String,
 }
 
 /// Row in timeline / lists.
@@ -234,13 +243,32 @@ impl Db {
             for (id, body) in rows {
                 for (pos, b) in blob_refs(&body).into_iter().enumerate() {
                     tx.execute(
-                        "INSERT OR IGNORE INTO attachment(entry_id, blob, pos) VALUES (?1, ?2, ?3)",
+                        "INSERT OR IGNORE INTO attachment(entry_id, blob, pos) VALUES (?1, ?2, ?3)", // v2 table
                         params![id, b, pos as i64],
                     )?;
                 }
                 tx.execute("UPDATE entry SET body=?1 WHERE id=?2", params![strip_blob_refs(&body), id])?;
             }
             tx.execute_batch("PRAGMA user_version=2")?;
+            tx.commit()?;
+        }
+        if v < 3 {
+            // v3: attachments get their own id so the same image can be attached more than once.
+            let tx = self.conn.unchecked_transaction()?;
+            tx.execute_batch(
+                "CREATE TABLE attachment_v3(
+                   id       INTEGER PRIMARY KEY,
+                   entry_id INTEGER NOT NULL REFERENCES entry(id) ON DELETE CASCADE,
+                   blob     TEXT NOT NULL,
+                   pos      INTEGER NOT NULL
+                 );
+                 INSERT INTO attachment_v3(entry_id, blob, pos)
+                   SELECT entry_id, blob, pos FROM attachment ORDER BY entry_id, pos;
+                 DROP TABLE attachment;
+                 ALTER TABLE attachment_v3 RENAME TO attachment;
+                 CREATE INDEX attachment_entry ON attachment(entry_id, pos);
+                 PRAGMA user_version=3;",
+            )?;
             tx.commit()?;
         }
         Ok(())
@@ -339,24 +367,30 @@ impl Db {
         Ok(e)
     }
 
-    pub fn attachments(&self, id: i64) -> Result<Vec<String>> {
-        let mut st = self.conn.prepare_cached("SELECT blob FROM attachment WHERE entry_id=?1 ORDER BY pos")?;
-        st.query_map([id], |r| r.get(0))?.collect()
+    pub fn attachments(&self, id: i64) -> Result<Vec<Img>> {
+        let mut st = self.conn.prepare_cached("SELECT id, blob FROM attachment WHERE entry_id=?1 ORDER BY pos, id")?;
+        st.query_map([id], |r| Ok(Img { id: r.get(0)?, blob: r.get(1)? }))?.collect()
     }
 
-    pub fn add_attachment(&self, id: i64, blob: &str) -> Result<()> {
+    /// Appends an image to an entry; returns the attachment id.
+    pub fn add_attachment(&self, id: i64, blob: &str) -> Result<i64> {
         self.conn.execute(
-            "INSERT OR IGNORE INTO attachment(entry_id, blob, pos)
+            "INSERT INTO attachment(entry_id, blob, pos)
              VALUES (?1, ?2, (SELECT coalesce(max(pos), -1) + 1 FROM attachment WHERE entry_id=?1))",
             params![id, blob],
         )?;
+        let aid = self.conn.last_insert_rowid();
         self.conn.execute("UPDATE entry SET updated=?1 WHERE id=?2", params![now_ms(), id])?;
+        Ok(aid)
+    }
+
+    pub fn remove_attachment(&self, attachment_id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM attachment WHERE id=?1", [attachment_id])?;
         Ok(())
     }
 
-    pub fn remove_attachment(&self, id: i64, blob: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM attachment WHERE entry_id=?1 AND blob=?2", params![id, blob])?;
-        Ok(())
+    pub fn revision_count(&self, id: i64) -> Result<i64> {
+        self.conn.query_row("SELECT count(*) FROM revision WHERE entry_id=?1", [id], |r| r.get(0))
     }
 
     /// Body and images of the most recently created live entry (to avoid re-capturing the same clipboard).
@@ -370,7 +404,7 @@ impl Db {
             )
             .optional()?;
         match row {
-            Some((id, body)) => Ok(Some((body, self.attachments(id)?))),
+            Some((id, body)) => Ok(Some((body, self.attachments(id)?.into_iter().map(|i| i.blob).collect()))),
             None => Ok(None),
         }
     }
@@ -457,16 +491,21 @@ mod tests {
         let db = Db::open(&p).unwrap();
         let a = db.get(1).unwrap();
         assert_eq!(a.body, "hej\n\nslut ![x](https://x)");
-        assert_eq!(a.images, vec!["aa11.png"]);
+        let blobs = |v: Vec<Img>| v.into_iter().map(|i| i.blob).collect::<Vec<_>>();
+        assert_eq!(blobs(a.images), vec!["aa11.png"]);
         let b = db.get(2).unwrap();
-        assert_eq!((b.body.as_str(), b.images.clone()), ("", vec!["bb22.png".to_string()]));
+        assert_eq!((b.body.as_str(), blobs(b.images.clone())), ("", vec!["bb22.png".to_string()]));
         let items = db.day_items(0, i64::MAX).unwrap();
         assert_eq!(items[1].thumb.as_deref(), Some("bb22.png"));
-        db.add_attachment(2, "cc33.png").unwrap();
-        db.add_attachment(2, "cc33.png").unwrap();
-        assert_eq!(db.attachments(2).unwrap(), vec!["bb22.png", "cc33.png"]);
-        db.remove_attachment(2, "bb22.png").unwrap();
+        // Deliberate copies are allowed and individually removable.
+        let c1 = db.add_attachment(2, "cc33.png").unwrap();
+        let c2 = db.add_attachment(2, "cc33.png").unwrap();
+        assert_ne!(c1, c2);
+        assert_eq!(blobs(db.attachments(2).unwrap()), vec!["bb22.png", "cc33.png", "cc33.png"]);
+        db.remove_attachment(b.images[0].id).unwrap();
+        db.remove_attachment(c1).unwrap();
         assert_eq!(db.latest().unwrap().unwrap().1, vec!["cc33.png"]);
+        assert_eq!(db.attachments(2).unwrap()[0].id, c2);
     }
 
     #[test]

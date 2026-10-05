@@ -63,7 +63,11 @@ pub struct App {
     pub(crate) main: MainState,
     pub(crate) md_cache: egui_commonmark::CommonMarkCache,
     /// Image ref shown enlarged in a modal.
-    pub(crate) lightbox: Option<String>,
+    pub(crate) lightbox: Option<crate::db::Img>,
+    /// Pasted picture already in the entry: (blob, #n) waiting for "Lägg till kopia?".
+    pub(crate) dup_prompt: Option<(String, usize)>,
+    /// Shortcut overlay in the capture popup ("?" button / hold F1).
+    pub(crate) capture_help: bool,
 }
 
 impl App {
@@ -179,6 +183,8 @@ impl App {
             main: MainState::new(),
             md_cache: Default::default(),
             lightbox: None,
+            dup_prompt: None,
+            capture_help: false,
         }
     }
 
@@ -232,7 +238,7 @@ impl App {
                 d.flush(&self.db);
             }
             Some(Clip::Image(r)) if latest.as_ref().is_none_or(|(b, imgs)| !(b.is_empty() && imgs == &[r.clone()])) => {
-                d.attach(&self.db, r);
+                d.attach(&self.db, r, false);
             }
             _ => {}
         }
@@ -257,7 +263,14 @@ impl App {
             if self.capture_naming {
                 d.commit_name(&self.db);
             }
-            if discard { d.discard(&self.db) } else { d.close(&self.db) }
+            if discard {
+                d.discard(&self.db);
+            } else {
+                d.close(&self.db);
+                if d.has_content() {
+                    self.flash_tray(ctx);
+                }
+            }
         }
         self.capture_naming = false;
         self.main.stale = true;
@@ -319,21 +332,23 @@ impl App {
 
     /// Enlarged image with a compact toolbar; right-click on the image gives the same menu.
     fn lightbox_ui(&mut self, ctx: &egui::Context) {
-        let Some(r) = self.lightbox.clone() else { return };
+        let Some(img) = self.lightbox.clone() else { return };
+        let r = img.blob.clone();
         let uri = doc::blob_uri(&self.dir, &r);
+        let info = doc::meta_line(&self.dir, &r);
         let max = ctx.content_rect().size() * egui::vec2(0.85, 0.75);
         let mut close = false;
         let mut act = None;
         let resp = egui::Modal::new(egui::Id::new("lightbox")).show(ctx, |ui| {
-            let img = ui.add(
+            let pic = ui.add(
                 egui::Image::new(uri)
                     .fit_to_exact_size(max)
                     .maintain_aspect_ratio(true)
                     .corner_radius(4)
                     .sense(egui::Sense::click()),
             );
-            img.context_menu(|ui| {
-                if let Some(a) = doc::image_menu(ui, &r, vec![r.clone()]) {
+            pic.context_menu(|ui| {
+                if let Some(a) = doc::image_menu(ui, &r, vec![img.id]) {
                     act = Some(a);
                 }
             });
@@ -356,11 +371,13 @@ impl App {
                     act = Some(doc::ImgAction::Reveal(r.clone()));
                 }
                 if b(ui, "Ta bort", theme::ERR) {
-                    act = Some(doc::ImgAction::Remove(vec![r.clone()]));
+                    act = Some(doc::ImgAction::Remove(vec![img.id]));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     close = b(ui, "Stäng", theme::TEXT);
                     ui.label(egui::RichText::new("Esc").color(theme::WEAK).size(12.0));
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new(&info).color(theme::WEAK).size(12.0));
                 });
             });
         });
@@ -397,7 +414,7 @@ impl App {
             OpenWith(r) => open_with(&path(&r)),
             Select(r, add) => {
                 if let Some(d) = self.active_doc() {
-                    d.select(&r, add);
+                    d.select(r, add);
                 }
             }
             Remove(list) => {
@@ -408,7 +425,7 @@ impl App {
                 };
                 if let Some(d) = doc {
                     for r in &list {
-                        d.detach(db, r);
+                        d.detach(db, *r);
                     }
                 }
                 self.main.stale = true;
@@ -427,7 +444,7 @@ impl App {
     /// Delete removes selected images, Esc clears the selection (when the text field isn't focused).
     /// Returns true if it consumed Esc.
     pub(crate) fn selection_keys(&mut self, ctx: &egui::Context) -> bool {
-        if self.lightbox.is_some() {
+        if self.lightbox.is_some() || self.dup_prompt.is_some() {
             return false;
         }
         let Some(d) = self.active_doc() else { return false };
@@ -458,7 +475,7 @@ impl App {
         if self.last_stash.as_deref() != Some(key.as_str()) {
             let res = match &clip {
                 Clip::Text(t) => self.db.insert(t).and_then(|id| self.db.add_revision(id, t)),
-                Clip::Image(r) => self.db.insert("").and_then(|id| self.db.add_attachment(id, r)),
+                Clip::Image(r) => self.db.insert("").and_then(|id| self.db.add_attachment(id, r)).map(|_| ()),
             };
             match res {
                 Ok(()) => {
@@ -468,6 +485,11 @@ impl App {
                 Err(e) => return log::error(format!("tyst fångst: {e}")),
             }
         }
+        self.flash_tray(ctx);
+    }
+
+    /// Short green flash of the tray icon: "it's on disk".
+    fn flash_tray(&self, ctx: &egui::Context) {
         if let Some(t) = &self.tray {
             t.flash(true);
             let (s, c) = (self.sig.clone(), ctx.clone());
@@ -491,11 +513,74 @@ impl App {
             Mode::Main => self.main.editor.as_mut(),
             Mode::Hidden => None,
         };
+        // Works wherever focus is inside the window; modals own the keyboard while open.
+        if self.lightbox.is_some() || self.dup_prompt.is_some() || !ctx.input(|i| i.focused) {
+            return;
+        }
         if let Some(d) = doc
-            && d.has_focus(ctx)
+            && let Some((blob, res)) = d.paste_image(&self.db, &self.dir)
         {
-            d.paste_image(&self.db, &self.dir);
+            if let doc::Attach::Duplicate(n) = res {
+                self.dup_prompt = Some((blob, n));
+            }
             self.main.stale = true;
+        }
+    }
+
+    /// "Bilden är identisk med #n – lägg till som kopia?"
+    fn dup_prompt_ui(&mut self, ctx: &egui::Context) {
+        let Some((blob, n)) = self.dup_prompt.clone() else { return };
+        let mut answer = None;
+        let resp = egui::Modal::new(egui::Id::new("dup_prompt")).show(ctx, |ui| {
+            ui.set_max_width(360.0);
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::Image::new(doc::blob_uri(&self.dir, &blob))
+                        .fit_to_exact_size(egui::vec2(96.0, 64.0))
+                        .maintain_aspect_ratio(true)
+                        .corner_radius(4),
+                );
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(format!("Bilden är identisk med #{n}.")).family(theme::medium()));
+                    ui.label(
+                        egui::RichText::new("En kopia återanvänder samma fil – inget extra utrymme.")
+                            .color(theme::WEAK)
+                            .size(12.0),
+                    );
+                    ui.label(egui::RichText::new(doc::meta_line(&self.dir, &blob)).color(theme::WEAK).size(12.0));
+                });
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button(egui::RichText::new("Lägg till kopia").color(theme::ACCENT)).clicked() {
+                    answer = Some(true);
+                }
+                if ui.button("Avbryt").clicked() {
+                    answer = Some(false);
+                }
+                ui.label(egui::RichText::new("Enter / Esc").color(theme::WEAK).size(12.0));
+            });
+        });
+        if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+            answer = Some(true);
+        }
+        if resp.should_close() {
+            answer = answer.or(Some(false));
+        }
+        match answer {
+            Some(true) => {
+                let doc = match self.mode {
+                    Mode::Capture => self.capture.as_mut(),
+                    _ => self.main.editor.as_mut(),
+                };
+                if let Some(d) = doc {
+                    d.attach(&self.db, blob, true);
+                }
+                self.main.stale = true;
+                self.dup_prompt = None;
+            }
+            Some(false) => self.dup_prompt = None,
+            None => {}
         }
     }
 }
@@ -561,11 +646,13 @@ impl eframe::App for App {
                 self.poll_image_paste(&ctx);
                 self.capture_ui(ui);
                 self.lightbox_ui(&ctx);
+                self.dup_prompt_ui(&ctx);
             }
             Mode::Main => {
                 self.poll_image_paste(&ctx);
                 self.main_ui(ui);
                 self.lightbox_ui(&ctx);
+                self.dup_prompt_ui(&ctx);
             }
         }
     }

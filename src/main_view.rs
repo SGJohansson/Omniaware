@@ -3,7 +3,7 @@
 use crate::app::App;
 use crate::db::Item;
 use crate::doc::Doc;
-use crate::theme::{self, hint};
+use crate::theme;
 use chrono::{Datelike, Duration, Local, NaiveDate, TimeZone};
 use egui::{Align, Align2, Color32, FontId, Id, Key, Layout, Margin, Modifiers, RichText, Sense, Ui, ViewportCommand};
 use std::collections::HashSet;
@@ -228,7 +228,7 @@ impl App {
         // ---- global keys ----
         let nothing_focused = ctx.memory(|m| m.focused().is_none());
         let esc_used = self.selection_keys(&ctx);
-        if self.lightbox.is_some() || esc_used {
+        if self.lightbox.is_some() || self.dup_prompt.is_some() || esc_used {
             // the lightbox / image selection owns Esc
         } else if ctx.input(|i| i.key_pressed(Key::Escape)) {
             if self.main.editor.is_some() {
@@ -245,11 +245,21 @@ impl App {
         if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::N)) {
             self.new_entry();
         }
-        if let Some(ed) = self.main.editor.as_mut()
-            && ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::E))
-        {
-            ed.preview = !ed.preview;
-            ed.focus = !ed.preview;
+        if let Some(ed) = self.main.editor.as_mut() {
+            if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::E)) {
+                ed.preview = !ed.preview;
+                ed.focus = !ed.preview;
+            }
+            if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::S)) {
+                ed.save_now(&self.db);
+                self.main.stale = true;
+            }
+            if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F2)) {
+                ctx.memory_mut(|m| m.request_focus(Id::new("ed_name")));
+            }
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F1)) {
+            self.toggle_shortcuts();
         }
         if self.main.editor.is_none() && self.main.view == View::Timeline && nothing_focused {
             let (l, r, t) = ctx.input(|i| (i.key_pressed(Key::ArrowLeft), i.key_pressed(Key::ArrowRight), i.key_pressed(Key::T)));
@@ -267,7 +277,7 @@ impl App {
 
         self.top_bar(ui);
         self.side_bar(ui);
-        self.hint_bar(ui);
+        self.shortcut_panel(ui);
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(theme::BG).inner_margin(Margin::symmetric(20, 14)))
             .show(ui, |ui| {
@@ -282,6 +292,51 @@ impl App {
                     }
                 }
             });
+        resize_grip(ui);
+    }
+
+    fn toggle_shortcuts(&mut self) {
+        self.cfg.window.shortcuts = !self.cfg.window.shortcuts;
+        crate::config::save(&self.dir, &self.cfg);
+    }
+
+    /// Right edge: a slim "?" tab, or the full shortcut list (F1 toggles; remembered in config).
+    fn shortcut_panel(&mut self, ui: &mut Ui) {
+        let open = self.cfg.window.shortcuts;
+        let mut toggle = false;
+        egui::Panel::right("m_keys")
+            .resizable(false)
+            .exact_size(if open { 300.0 } else { 26.0 })
+            .frame(egui::Frame::new().fill(theme::BG_SIDE).inner_margin(Margin::symmetric(if open { 12 } else { 0 }, 10)))
+            .show(ui, |ui| {
+                if open {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Genvägar").family(theme::medium()));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            toggle = ui.add(egui::Button::new("›").frame(false)).on_hover_text("Fäll in (F1)").clicked();
+                            ui.label(RichText::new("F1").color(theme::WEAK).size(11.5));
+                        });
+                    });
+                    ui.add_space(8.0);
+                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                        theme::shortcut_groups(ui, theme::MAIN_KEYS);
+                    });
+                } else {
+                    // Whole strip is the tab; vertical label reads bottom-to-top.
+                    let rect = ui.max_rect();
+                    let resp = ui.interact(rect, Id::new("keys_tab"), Sense::click()).on_hover_text("Genvägar (F1)");
+                    if resp.hovered() {
+                        ui.painter().rect_filled(rect, 0.0, Color32::from_rgb(30, 32, 36));
+                    }
+                    let g = ui.painter().layout_no_wrap("?  genvägar · F1".into(), FontId::monospace(11.5), theme::WEAK);
+                    let pos = egui::pos2(rect.center().x - g.size().y / 2.0, rect.top() + 16.0 + g.size().x);
+                    ui.painter().add(egui::epaint::TextShape::new(pos, g, theme::WEAK).with_angle(-std::f32::consts::FRAC_PI_2));
+                    toggle = resp.clicked();
+                }
+            });
+        if toggle {
+            self.toggle_shortcuts();
+        }
     }
 
     fn top_bar(&mut self, ui: &mut Ui) {
@@ -438,58 +493,6 @@ impl App {
         if let Some(d) = pick_day {
             self.set_day(d);
         }
-    }
-
-    fn hint_bar(&mut self, ui: &mut Ui) {
-        let editor = self.main.editor.is_some();
-        let view = self.main.view;
-        egui::Panel::bottom("m_hints")
-            .frame(egui::Frame::new().fill(theme::BG_SIDE).inner_margin(Margin::symmetric(12, 6)))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if editor {
-                        hint(ui, &["Esc"], "tillbaka");
-                        hint(ui, &["Ctrl", "E"], "förhandsvisa");
-                        hint(ui, &["Ctrl", "V"], "bild");
-                    } else {
-                        match view {
-                            View::Search => {
-                                hint(ui, &["↑", "↓"], "välj");
-                                hint(ui, &["Enter"], "öppna");
-                                hint(ui, &["Shift", "Enter"], "klistra in");
-                                hint(ui, &["Esc"], "tillbaka");
-                            }
-                            View::Timeline => {
-                                hint(ui, &["←", "→"], "dag");
-                                hint(ui, &["T"], "idag");
-                                hint(ui, &["Ctrl", "N"], "nytt");
-                                hint(ui, &["Esc"], "stäng");
-                            }
-                            _ => {
-                                hint(ui, &["Ctrl", "K"], "sök");
-                                hint(ui, &["Esc"], "tillbaka");
-                            }
-                        }
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        // resize grip
-                        let (r, resp) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), Sense::drag());
-                        let st = egui::Stroke::new(1.0, theme::WEAK);
-                        for k in [4.0, 8.0, 12.0] {
-                            ui.painter().line_segment([egui::pos2(r.right() - k, r.bottom()), egui::pos2(r.right(), r.bottom() - k)], st);
-                        }
-                        if resp.on_hover_cursor(egui::CursorIcon::ResizeSouthEast).drag_started() {
-                            ui.ctx().send_viewport_cmd(ViewportCommand::BeginResize(egui::ResizeDirection::SouthEast));
-                        }
-                        ui.add_space(8.0);
-                        ui.spacing_mut().item_spacing.x = 3.0;
-                        ui.label(RichText::new("tyst fångst").color(theme::WEAK).size(12.0));
-                        for k in ["C", "C", "Ctrl"] {
-                            theme::keycap(ui, k);
-                        }
-                    });
-                });
-            });
     }
 
     fn timeline_view(&mut self, ui: &mut Ui) {
@@ -686,26 +689,10 @@ impl App {
         let mut commit = false;
         let mut img_act = None;
         let Some(ed) = self.main.editor.as_mut() else { return };
+        // Row 1: navigation + name on the left, actions on the right. Row 2: timestamp.
+        // Buttons are placed first (right-to-left) so a narrow window shrinks the name field, not them.
         ui.horizontal(|ui| {
             back = ui.button("← Tillbaka").clicked();
-            ui.add_space(6.0);
-            let r = ui.add(
-                egui::TextEdit::singleline(&mut ed.name)
-                    .hint_text("namn (valfritt)")
-                    .desired_width(220.0)
-                    .margin(Margin::symmetric(8, 4)),
-            );
-            if r.changed() {
-                ed.name_takeover = None;
-                ed.name_msg = None;
-            }
-            if r.lost_focus() {
-                commit = true;
-            }
-            let when = date_of(ed.created)
-                .map(|d| format!("{} {}", theme::day_long(d, today), hhmm(ed.created)))
-                .unwrap_or_default();
-            ui.label(RichText::new(when).color(theme::WEAK).size(12.0));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 discard = ui.button(RichText::new("Kasta").color(theme::ERR)).clicked();
                 let lbl = if ed.preview { "Redigera" } else { "Förhandsvisa" };
@@ -713,10 +700,30 @@ impl App {
                     ed.preview = !ed.preview;
                     ed.focus = !ed.preview;
                 }
-                ui.add_space(6.0);
+                ui.add_space(4.0);
                 ed.indicator(ui);
+                ui.add_space(8.0);
+                let w = (ui.available_width() - 4.0).clamp(80.0, 260.0);
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut ed.name)
+                        .id(Id::new("ed_name"))
+                        .hint_text("namn (valfritt, F2)")
+                        .desired_width(w)
+                        .margin(Margin::symmetric(8, 4)),
+                );
+                if r.changed() {
+                    ed.name_takeover = None;
+                    ed.name_msg = None;
+                }
+                if r.lost_focus() {
+                    commit = true;
+                }
             });
         });
+        let when = date_of(ed.created)
+            .map(|d| format!("{} {}", theme::day_long(d, today), hhmm(ed.created)))
+            .unwrap_or_default();
+        ui.label(RichText::new(when).color(theme::WEAK).size(12.0));
         if let Some(m) = &ed.name_msg {
             ui.label(RichText::new(m).color(theme::WARN).size(12.0));
         }
@@ -766,5 +773,20 @@ impl App {
         } else if back {
             self.close_editor();
         }
+    }
+}
+
+/// Bottom-right resize handle for the undecorated window.
+fn resize_grip(ui: &mut Ui) {
+    let screen = ui.ctx().content_rect();
+    let r = egui::Rect::from_min_size(screen.max - egui::vec2(16.0, 16.0), egui::vec2(16.0, 16.0));
+    let resp = ui.interact(r, Id::new("resize_grip"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeSouthEast);
+    let p = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("grip_paint")));
+    let st = egui::Stroke::new(1.0, if resp.hovered() { theme::ACCENT } else { theme::WEAK });
+    for k in [4.0, 8.0, 12.0] {
+        p.line_segment([egui::pos2(r.right() - k - 2.0, r.bottom() - 2.0), egui::pos2(r.right() - 2.0, r.bottom() - k - 2.0)], st);
+    }
+    if resp.drag_started() {
+        ui.ctx().send_viewport_cmd(ViewportCommand::BeginResize(egui::ResizeDirection::SouthEast));
     }
 }

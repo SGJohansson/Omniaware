@@ -1,7 +1,7 @@
 //! Capture popup UI (Win+Alt+V / tray click).
 
 use crate::app::App;
-use crate::theme::{self, hint};
+use crate::theme;
 use egui::{Align, Id, Key, Layout, Margin, Modifiers, RichText, Sense, TextEdit, ViewportCommand};
 
 enum Action {
@@ -23,7 +23,7 @@ impl App {
         }
 
         // ---- keys (the lightbox owns Esc while it is open) ----
-        let modal = self.lightbox.is_some();
+        let modal = self.lightbox.is_some() || self.dup_prompt.is_some();
         let mut action = Action::None;
         let esc_used = self.selection_keys(&ctx);
         let (esc, shift) = ctx.input(|i| (i.key_pressed(Key::Escape), i.modifiers.shift));
@@ -38,8 +38,12 @@ impl App {
             } else {
                 action = if shift { Action::Discard } else { Action::Save };
             }
-        } else if !self.capture_naming && ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::S)) {
+        } else if !self.capture_naming && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F2)) {
             self.capture_naming = true;
+        } else if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::S)) {
+            if let Some(d) = self.capture.as_mut() {
+                d.save_now(&self.db);
+            }
         }
         match action {
             Action::Save => return self.finish_capture(&ctx, false),
@@ -48,6 +52,8 @@ impl App {
         }
 
         let naming = self.capture_naming;
+        let show_help = self.capture_help || ctx.input(|i| i.key_down(Key::F1));
+        let mut toggle_help = false;
         let dir = self.dir.clone();
         let today = chrono::Local::now().date_naive();
         let Some(doc) = self.capture.as_mut() else { return };
@@ -68,29 +74,25 @@ impl App {
                         (None, false) => format!("→ Journal · {}", theme::day_short(today)),
                     };
                     ui.label(RichText::new(dest).color(theme::WEAK).size(12.0));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| doc.indicator(ui));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        doc.indicator(ui);
+                        let q = ui
+                            .add(egui::Button::new(RichText::new("?").size(12.0).color(theme::WEAK)).frame(false))
+                            .on_hover_text("Genvägar (håll F1)");
+                        toggle_help = q.clicked();
+                    });
                 })
 ;
         });
 
-        // ---- footer ----
-        egui::Panel::bottom("cap_ftr").frame(bar(theme::BG, 12, 8)).show(ui, |ui| {
-            if let Some(a) = doc.thumbs(ui, &dir, crate::doc::THUMB) {
-                img_act = Some(a);
-            }
-            ui.horizontal(|ui| {
-                if naming {
-                    hint(ui, &["Enter"], "spara namn");
-                    hint(ui, &["Esc"], "avbryt");
-                } else {
-                    hint(ui, &["Esc"], "spara");
-                    hint(ui, &["Ctrl", "Alt", "O"], "vidga");
-                    hint(ui, &["Ctrl", "S"], "namnge");
-                    hint(ui, &["Ctrl", "V"], "bild");
-                    hint(ui, &["Shift", "Esc"], "kasta");
+        // ---- footer: images only (shortcuts live behind "?" / F1) ----
+        if !doc.images.is_empty() {
+            egui::Panel::bottom("cap_ftr").frame(bar(theme::BG, 12, 8)).show(ui, |ui| {
+                if let Some(a) = doc.thumbs(ui, &dir, crate::doc::THUMB) {
+                    img_act = Some(a);
                 }
             });
-        });
+        }
 
         // ---- body ----
         let mut confirm = false;
@@ -114,6 +116,7 @@ impl App {
                     if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                         confirm = true;
                     }
+                    ui.label(RichText::new("Enter sparar · Esc avbryter").color(theme::WEAK).size(12.0));
                 });
                 if let Some(m) = &doc.name_msg {
                     ui.label(RichText::new(m).color(theme::WARN).size(12.0));
@@ -123,6 +126,28 @@ impl App {
             doc.editor(ui, "Skriv eller klistra in…");
         });
 
+        if show_help {
+            egui::Area::new(Id::new("cap_help"))
+                .order(egui::Order::Foreground)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(&ctx, |ui| {
+                    egui::Frame::new()
+                        .fill(theme::BG_SIDE)
+                        .stroke(egui::Stroke::new(1.0, theme::LINE))
+                        .corner_radius(8)
+                        .inner_margin(Margin::same(14))
+                        .show(ui, |ui| {
+                            ui.set_min_width(540.0);
+                            ui.columns(2, |c| {
+                                theme::shortcut_groups(&mut c[0], &theme::CAPTURE_KEYS[..1]);
+                                theme::shortcut_groups(&mut c[1], &theme::CAPTURE_KEYS[1..]);
+                            });
+                        });
+                });
+        }
+        if toggle_help {
+            self.capture_help = !self.capture_help;
+        }
         if let Some(a) = img_act {
             self.image_action(a);
         }

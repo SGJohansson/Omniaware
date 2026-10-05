@@ -73,19 +73,6 @@ pub fn install(ctx: &egui::Context, size: f32) {
     });
 }
 
-/// `[Ctrl] [S] namnge` — keycaps followed by a weak label.
-pub fn hint(ui: &mut Ui, keys: &[&str], label: &str) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 3.0;
-        for k in keys {
-            keycap(ui, k);
-        }
-        ui.add_space(4.0);
-        ui.label(RichText::new(label).color(WEAK).size(12.0));
-    });
-    ui.add_space(9.0);
-}
-
 pub fn keycap(ui: &mut Ui, k: &str) {
     egui::Frame::new()
         .fill(BG_FIELD)
@@ -137,4 +124,77 @@ pub fn day_long(d: NaiveDate, today: NaiveDate) -> String {
         month_name(d.month())
     );
     if d.year() == today.year() { base } else { format!("{base} {}", d.year()) }
+}
+
+/// Keycaps + description.
+pub type Row = (&'static [&'static str], &'static str);
+pub type Group = (&'static str, &'static [Row]);
+
+const GLOBAL: &[Row] = &[
+    (&["Ctrl", "C", "C"], "tyst fångst"),
+    (&["Ctrl", "Alt", "O"], "ruta → vidga → stäng"),
+];
+const IMAGES: &[Row] = &[
+    (&["Klick"], "markera"),
+    (&["Ctrl", "Klick"], "markera flera"),
+    (&["Dubbelklick"], "förstora"),
+    (&["Högerklick"], "meny"),
+    (&["Delete"], "ta bort markerade"),
+];
+
+pub const CAPTURE_KEYS: &[Group] = &[
+    (
+        "Snabbruta",
+        &[
+            (&["Esc"], "spara och stäng"),
+            (&["Ctrl", "S"], "spara version"),
+            (&["F2"], "namnge"),
+            (&["Ctrl", "V"], "klistra in bild"),
+            (&["Ctrl", "Alt", "O"], "vidga"),
+            (&["Shift", "Esc"], "kasta"),
+        ],
+    ),
+    ("Bilder", IMAGES),
+    ("Globalt", GLOBAL),
+];
+
+pub const MAIN_KEYS: &[Group] = &[
+    (
+        "Tidslinje",
+        &[(&["←", "→"], "dag"), (&["T"], "idag"), (&["Ctrl", "N"], "nytt inlägg"), (&["Ctrl", "K"], "sök")],
+    ),
+    (
+        "Inlägg",
+        &[
+            (&["Ctrl", "S"], "spara version"),
+            (&["F2"], "namnge"),
+            (&["Ctrl", "E"], "förhandsvisa"),
+            (&["Ctrl", "V"], "klistra in bild"),
+            (&["Esc"], "tillbaka"),
+        ],
+    ),
+    ("Sök", &[(&["↑", "↓"], "välj"), (&["Enter"], "öppna"), (&["Shift", "Enter"], "klistra in")]),
+    ("Bilder", IMAGES),
+    ("Globalt", GLOBAL),
+];
+
+/// Grouped shortcut list (keycaps column + description column).
+pub fn shortcut_groups(ui: &mut Ui, groups: &[Group]) {
+    for (title, rows) in groups {
+        ui.label(RichText::new(*title).family(medium()).size(12.5).color(ACCENT));
+        ui.add_space(2.0);
+        egui::Grid::new(("keys", *title)).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+            for (keys, what) in rows.iter() {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    for k in keys.iter() {
+                        keycap(ui, k);
+                    }
+                });
+                ui.label(RichText::new(*what).color(WEAK).size(12.0));
+                ui.end_row();
+            }
+        });
+        ui.add_space(10.0);
+    }
 }
