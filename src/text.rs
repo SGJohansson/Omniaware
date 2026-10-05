@@ -50,6 +50,26 @@ pub const BTN_CANCEL: &str = "cancel";
 pub const BTN_RESTORE: &str = "restore";
 pub const BTN_DELETE: &str = "delete";
 pub const BTN_SURE: &str = "sure?";
+pub const BTN_SELECT_ALL: &str = "select all";
+pub const BTN_CLEAR: &str = "clear";
+pub const BTN_DELETE_FOREVER: &str = "delete forever";
+pub const BTN_EMPTY_BIN: &str = "empty bin";
+
+pub fn selected(n: usize) -> String {
+    format!("{n} selected")
+}
+
+pub fn purge_confirm(n: usize) -> String {
+    format!("delete {n} forever? press again")
+}
+
+pub fn results(n: usize) -> String {
+    format!("{n} {}", plural(n, "result", "results"))
+}
+
+pub fn bad_pattern(e: &str) -> String {
+    format!("Invalid pattern: {e}")
+}
 
 pub fn btn_remove_n(n: usize) -> String {
     if n > 1 { format!("remove {n} images") } else { BTN_REMOVE.to_string() }
@@ -65,6 +85,9 @@ pub const TIP_TILE: &str = "Double-click: enlarge · Ctrl+click: select several 
 pub const SHORTCUTS: &str = "Shortcuts";
 pub const SHORTCUTS_TAB: &str = "?  shortcuts · F1";
 pub const SEARCH_HINT: &str = "Search everything…";
+pub const SEARCH_HELP: &str = "words match inside words · * ? wildcards · /regex/";
+pub const TIP_TO_BIN: &str = "Moves them to the bin";
+pub const TIP_COPY_TEXT: &str = "Copy the text";
 pub const NAME_HINT_MAIN: &str = "name (optional, F2)";
 pub const NAME_HINT: &str = "e.g. address-work";
 pub const NAME_LABEL: &str = "Name";
@@ -119,6 +142,14 @@ pub const LEGEND_SAVED: &str = "saved to disk";
 pub const LEGEND_WAITING: &str = "waiting to save";
 pub const LEGEND_ERROR: &str = "error – see the log";
 pub const LEGEND_RING: &str = "A ring = something was just saved.";
+
+// ---------- notices (above the tray) ----------
+
+pub const NOTICE_SAVED: &str = "Saved";
+pub const NOTICE_CAPTURED: &str = "Captured silently";
+pub const NOTICE_ALREADY: &str = "Already captured";
+pub const NOTICE_FAILED: &str = "Couldn't save";
+pub const NOTICE_SEE_LOG: &str = "see omniaware.log";
 
 // ---------- naming ----------
 
@@ -212,6 +243,17 @@ pub const MAIN_KEYS: &[Group] = &[
             (&["Ctrl", "V"], "paste image"),
             (&["Ctrl", "Click"], "open link"),
             (&["Esc"], "back"),
+        ],
+    ),
+    (
+        "Lists",
+        &[
+            (&["Ctrl", "Click"], "select / deselect"),
+            (&["Shift", "Click"], "select a range"),
+            (&["Ctrl", "Shift", "Click"], "add a range"),
+            (&["Ctrl", "A"], "select all in the list"),
+            (&["Delete"], "move to bin"),
+            (&["Esc"], "clear selection"),
         ],
     ),
     (SEARCH, &[(&["↑", "↓"], "select"), (&["Enter"], "open"), (&["Shift", "Enter"], "paste")]),

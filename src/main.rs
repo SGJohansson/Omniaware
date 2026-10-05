@@ -10,6 +10,8 @@ mod log;
 mod main_view;
 mod text;
 mod markup;
+mod notice;
+mod search;
 mod theme;
 mod tray;
 mod win;

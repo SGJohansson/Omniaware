@@ -28,10 +28,16 @@ pub struct MainState {
     dots: HashSet<u32>,
     list: Vec<Item>,
     query: String,
+    query_err: Option<String>,
     results: Vec<Item>,
     sel: usize,
     focus_search: bool,
-    confirm_purge: Option<i64>,
+    /// Multi-selection in the list on screen (ids) and the Shift-click anchor (index).
+    picked: Vec<i64>,
+    anchor: Option<usize>,
+    /// "delete forever" / "empty bin" wait for a second press.
+    confirm_bulk: bool,
+    confirm_empty: bool,
 }
 
 impl MainState {
@@ -47,10 +53,14 @@ impl MainState {
             dots: HashSet::new(),
             list: Vec::new(),
             query: String::new(),
+            query_err: None,
             results: Vec::new(),
             sel: 0,
             focus_search: false,
-            confirm_purge: None,
+            picked: Vec::new(),
+            anchor: None,
+            confirm_bulk: false,
+            confirm_empty: false,
         }
     }
 }
@@ -113,13 +123,36 @@ fn row_meta(ui: &Ui, dir: &std::path::Path, it: &Item) -> std::sync::Arc<egui::G
     theme::runs(ui, &parts, 11.0)
 }
 
-fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool) -> egui::Response {
-    let time_w = if time.len() > 5 { 92.0 } else { 52.0 };
-    let h = 32.0;
+/// How a list row is drawn.
+#[derive(Clone, Copy)]
+struct RowOpts<'a> {
+    time: &'a str,
+    /// Keyboard cursor (search results).
+    current: bool,
+    /// Part of the multi-selection.
+    checked: bool,
+    /// Show checkboxes even when not hovered (something is selected).
+    boxes: bool,
+}
+
+struct RowOut {
+    resp: egui::Response,
+    /// The checkbox itself was clicked.
+    toggled: bool,
+}
+
+const BOX_W: f32 = 24.0;
+
+fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, o: RowOpts<'_>) -> RowOut {
+    let time_w = if o.time.len() > 5 { 92.0 } else { 52.0 };
+    let two_line = !it.snippet.is_empty();
+    let h = if two_line { 50.0 } else { 32.0 };
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), h), Sense::click());
-    let bg = if it.is_event {
+    let bg = if o.checked {
+        Some(Color32::from_rgb(24, 46, 45))
+    } else if it.is_event {
         Some(theme::ACCENT_DIM)
-    } else if selected || resp.hovered() {
+    } else if o.current || resp.hovered() {
         Some(Color32::from_rgb(34, 36, 41))
     } else {
         None
@@ -127,10 +160,24 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool
     if let Some(bg) = bg {
         ui.painter_at(rect).rect_filled(rect, 5.0, bg);
     }
+    let line_cy = if two_line { rect.top() + 16.0 } else { rect.center().y };
+
+    // Checkbox (registered after the row, so it wins the click).
+    let box_r = egui::Rect::from_center_size(egui::pos2(rect.left() + 13.0, line_cy), egui::vec2(13.0, 13.0));
+    let box_resp = ui.interact(box_r.expand(4.0), ui.id().with(("row_box", it.id)), Sense::click());
+    if o.boxes || o.checked || resp.hovered() || box_resp.hovered() {
+        let stroke = if o.checked || box_resp.hovered() { theme::ACCENT } else { Color32::from_rgb(78, 82, 92) };
+        let p = ui.painter();
+        p.rect(box_r, 3.0, if o.checked { theme::ACCENT_DIM } else { theme::BG_FIELD }, egui::Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
+        if o.checked {
+            p.text(box_r.center(), Align2::CENTER_CENTER, "✓", FontId::monospace(11.0), theme::ACCENT);
+        }
+    }
+
     // Thumbnail of the first image at the right end; text is clipped before it.
     let mut text_right = rect.right() - 8.0;
     if let Some(t) = &it.thumb {
-        let tr = egui::Rect::from_min_size(egui::pos2(rect.right() - 52.0, rect.top() + 3.0), egui::vec2(44.0, h - 6.0));
+        let tr = egui::Rect::from_min_size(egui::pos2(rect.right() - 52.0, line_cy - 13.0), egui::vec2(44.0, 26.0));
         egui::Image::new(crate::doc::blob_uri(dir, t))
             .fit_to_exact_size(tr.size())
             .maintain_aspect_ratio(true)
@@ -144,9 +191,9 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool
     let font = FontId::monospace(13.0);
     let small = FontId::monospace(12.0);
     let fg = if it.is_event { theme::ACCENT } else { theme::TEXT };
-    let mut x = rect.left() + 10.0;
-    let cy = rect.center().y;
-    p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, time, small.clone(), theme::WEAK);
+    let mut x = rect.left() + BOX_W;
+    let cy = line_cy;
+    p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, o.time, small.clone(), theme::WEAK);
     x += time_w;
     // Summary column: images and their size on disk, or the word count for text-only entries.
     let meta = row_meta(ui, dir, it);
@@ -156,6 +203,7 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool
     let glyph = if it.is_event { "◆" } else if it.name.is_some() { "#" } else { "·" };
     p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, glyph, font.clone(), if it.is_event { theme::ACCENT } else { theme::WEAK });
     x += 20.0;
+    let text_x = x;
     if let Some(n) = &it.name {
         let g = p.layout_no_wrap(n.clone(), small.clone(), theme::TEXT);
         let chip = egui::Rect::from_min_size(egui::pos2(x, cy - 10.0), egui::vec2(g.size().x + 12.0, 20.0));
@@ -171,7 +219,49 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, time: &str, selected: bool
         (true, _) => (t::ROW_IMAGES.to_string(), theme::WEAK),
     };
     p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, text, font, col);
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+
+    // Search: the matching line, matches marked.
+    if two_line {
+        let g = snippet_galley(ui, &it.snippet, &it.marks);
+        p.galley(egui::pos2(text_x, rect.top() + 30.0), g, theme::WEAK);
+    }
+    RowOut { resp: resp.on_hover_cursor(egui::CursorIcon::PointingHand), toggled: box_resp.clicked() }
+}
+
+fn snippet_galley(ui: &Ui, text: &str, marks: &[std::ops::Range<usize>]) -> std::sync::Arc<egui::Galley> {
+    let font = FontId::monospace(11.5);
+    let plain = egui::TextFormat::simple(font.clone(), Color32::from_rgb(150, 154, 162));
+    let hit = egui::TextFormat { background: theme::ACCENT_DIM, ..egui::TextFormat::simple(font, theme::ACCENT) };
+    let mut job = egui::text::LayoutJob::default();
+    let mut at = 0;
+    for m in marks {
+        if m.start < at || m.end > text.len() || !text.is_char_boundary(m.start) || !text.is_char_boundary(m.end) {
+            continue;
+        }
+        job.append(&text[at..m.start], 0.0, plain.clone());
+        job.append(&text[m.clone()], 0.0, hit.clone());
+        at = m.end;
+    }
+    job.append(&text[at..], 0.0, plain);
+    ui.fonts_mut(|f| f.layout_job(job))
+}
+
+#[derive(Clone, Copy)]
+enum Bulk {
+    All,
+    Clear,
+    Copy,
+    /// To the bin.
+    Delete,
+    Restore,
+    /// Bin only, asks once.
+    Purge,
+}
+
+fn select_all_button(ui: &mut Ui) -> bool {
+    ui.add(egui::Button::new(RichText::new(t::BTN_SELECT_ALL).size(12.0).color(theme::WEAK)).frame(false))
+        .on_hover_text("Ctrl+A")
+        .clicked()
 }
 
 fn empty_note(ui: &mut Ui, text: &str) {
@@ -183,7 +273,6 @@ impl App {
     fn reload(&mut self) {
         let m = &mut self.main;
         m.stale = false;
-        m.confirm_purge = None;
         let from = local_ms(m.day);
         let to = local_ms(m.day + Duration::days(1));
         m.items = self.db.day_items(from, to).unwrap_or_else(|e| {
@@ -207,13 +296,23 @@ impl App {
             _ => Vec::new(),
         };
         if m.view == View::Search {
-            m.results = self.db.search(&m.query).unwrap_or_default();
+            m.results = self.db.search(&crate::search::parse(&m.query)).unwrap_or_default();
             m.sel = m.sel.min(m.results.len().saturating_sub(1));
         }
+        m.confirm_empty = false;
+        let ids = self.list_ids();
+        self.main.picked.retain(|id| ids.contains(id));
+    }
+
+    fn clear_picks(&mut self) {
+        self.main.picked.clear();
+        self.main.anchor = None;
+        self.main.confirm_bulk = false;
     }
 
     fn set_view(&mut self, v: View) {
         self.close_editor();
+        self.clear_picks();
         self.main.view = v;
         if v == View::Search {
             self.main.focus_search = true;
@@ -223,13 +322,14 @@ impl App {
 
     fn set_day(&mut self, d: NaiveDate) {
         self.close_editor();
+        self.clear_picks();
         self.main.day = d;
         self.main.month = d.with_day(1).unwrap_or(d);
         self.main.view = View::Timeline;
         self.main.stale = true;
     }
 
-    fn open_entry(&mut self, id: i64) {
+    pub(crate) fn open_entry(&mut self, id: i64) {
         self.close_editor();
         match self.db.get(id) {
             Ok(e) => self.main.editor = Some(Doc::open(e, &format!("ed-{id}"))),
@@ -264,7 +364,23 @@ impl App {
 
         // ---- global keys ----
         let nothing_focused = ctx.memory(|m| m.focused().is_none());
-        let esc_used = self.selection_keys(&ctx);
+        let mut esc_used = self.selection_keys(&ctx);
+        // List selection keys (no text field focused, no entry open).
+        let lists = self.main.editor.is_none() && self.lightbox.is_none() && self.dup_prompt.is_none();
+        if lists && nothing_focused {
+            if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::A)) {
+                self.apply_bulk(&ctx, Bulk::All);
+            }
+            if !self.main.picked.is_empty() {
+                if ctx.input(|i| i.key_pressed(Key::Delete)) {
+                    let b = if self.main.view == View::Trash { Bulk::Purge } else { Bulk::Delete };
+                    self.apply_bulk(&ctx, b);
+                } else if ctx.input(|i| i.key_pressed(Key::Escape)) {
+                    self.clear_picks();
+                    esc_used = true;
+                }
+            }
+        }
         if self.lightbox.is_some() || self.dup_prompt.is_some() || esc_used {
             // the lightbox / image selection owns Esc
         } else if ctx.input(|i| i.key_pressed(Key::Escape)) {
@@ -410,6 +526,13 @@ impl App {
                                 close = ui.add(egui::Button::new("✕").frame(false)).on_hover_text(t::TIP_CLOSE).clicked();
                                 ui.add_space(6.0);
                                 new = ui.button(t::BTN_NEW).on_hover_text("Ctrl+N").clicked();
+                                ui.add_space(10.0);
+                                let (sep, _) = ui.allocate_exact_size(egui::vec2(1.0, 18.0), Sense::hover());
+                                ui.painter().rect_filled(sep, 0.0, theme::LINE);
+                                ui.add_space(10.0);
+                                if theme::site_link(ui) {
+                                    theme::open_url(theme::SITE_URL);
+                                }
                             });
                         });
                     })
@@ -523,11 +646,6 @@ impl App {
                 if ui.add(egui::Button::new(RichText::new(t::BTN_TODAY).size(12.0)).min_size(egui::vec2(ui.available_width(), 24.0))).clicked() {
                     pick_day = Some(today);
                 }
-                ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-                    if theme::site_link(ui) {
-                        theme::open_url(theme::SITE_URL);
-                    }
-                });
             });
         if month_step != 0 {
             let m = self.main.month;
@@ -546,11 +664,155 @@ impl App {
         }
     }
 
+    // ---------- multi-selection (all lists) ----------
+
+    /// Ids of the list on screen, in display order.
+    fn list_ids(&self) -> Vec<i64> {
+        let m = &self.main;
+        let v = match m.view {
+            View::Timeline => &m.items,
+            View::Named | View::Trash => &m.list,
+            View::Search => &m.results,
+        };
+        v.iter().map(|i| i.id).collect()
+    }
+
+    /// Ctrl: toggle one · Shift: range from the anchor · Ctrl+Shift: add that range.
+    fn pick(&mut self, idx: usize, ctrl: bool, shift: bool) {
+        let ids = self.list_ids();
+        let Some(&id) = ids.get(idx) else { return };
+        let m = &mut self.main;
+        m.confirm_bulk = false;
+        if shift {
+            let a = m.anchor.unwrap_or(idx).min(ids.len() - 1);
+            if !ctrl {
+                m.picked.clear();
+            }
+            for &i in &ids[a.min(idx)..=a.max(idx)] {
+                if !m.picked.contains(&i) {
+                    m.picked.push(i);
+                }
+            }
+        } else {
+            if let Some(k) = m.picked.iter().position(|&x| x == id) {
+                m.picked.remove(k);
+            } else {
+                m.picked.push(id);
+            }
+            m.anchor = Some(idx);
+        }
+    }
+
+    /// Applies a row click: checkbox or modifiers select, a plain click returns the id to open.
+    fn row_click(&mut self, ctx: &egui::Context, click: Option<(usize, bool)>) -> Option<i64> {
+        let (idx, toggled) = click?;
+        let (ctrl, shift) = ctx.input(|i| (i.modifiers.command, i.modifiers.shift));
+        if toggled || ctrl || shift {
+            self.pick(idx, ctrl || toggled, shift && !toggled);
+            return None;
+        }
+        self.list_ids().get(idx).copied()
+    }
+
+    fn opts<'a>(&self, it: &Item, time: &'a str, current: bool) -> RowOpts<'a> {
+        RowOpts { time, current, checked: self.main.picked.contains(&it.id), boxes: !self.main.picked.is_empty() }
+    }
+
+    /// "3 selected · copy · delete · clear", or the bin variant. Returns the chosen action.
+    fn bulk_bar(&mut self, ui: &mut Ui) -> Option<Bulk> {
+        let n = self.main.picked.len();
+        if n == 0 {
+            return None;
+        }
+        let trash = self.main.view == View::Trash;
+        let confirm = self.main.confirm_bulk;
+        let mut act = None;
+        // Docked at the bottom so the rows never move when a selection starts.
+        egui::Panel::bottom(ui.id().with("bulk_bar"))
+            .frame(egui::Frame::new().inner_margin(Margin { left: 0, right: 0, top: 6, bottom: 0 }))
+            .show_separator_line(false)
+            .show(ui, |ui| {
+        egui::Frame::new()
+            .fill(Color32::from_rgb(24, 40, 39))
+            .stroke(egui::Stroke::new(1.0, theme::ACCENT_DIM))
+            .corner_radius(6)
+            .inner_margin(Margin::symmetric(10, 5))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(t::selected(n)).color(theme::ACCENT).family(theme::medium()));
+                    ui.add_space(8.0);
+                    if trash {
+                        if theme::quiet_button(ui, t::BTN_RESTORE).clicked() {
+                            act = Some(Bulk::Restore);
+                        }
+                        let lbl = if confirm { t::purge_confirm(n) } else { t::BTN_DELETE_FOREVER.to_string() };
+                        if ui.button(RichText::new(lbl).color(theme::ERR)).clicked() {
+                            act = Some(Bulk::Purge);
+                        }
+                    } else {
+                        if theme::quiet_button(ui, t::BTN_COPY).clicked() {
+                            act = Some(Bulk::Copy);
+                        }
+                        if ui.button(RichText::new(t::BTN_DELETE).color(theme::ERR)).on_hover_text(t::TIP_TO_BIN).clicked() {
+                            act = Some(Bulk::Delete);
+                        }
+                    }
+                    if theme::quiet_button(ui, t::BTN_CLEAR).clicked() {
+                        act = Some(Bulk::Clear);
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        // Right-to-left: added rightmost first, so the keys of a combo go in reverse.
+                        theme::key_hint(ui, &["esc"]);
+                        theme::key_hint(ui, &["del"]);
+                        theme::key_hint(ui, &["a", "ctrl"]);
+                    });
+                });
+            });
+            });
+        act
+    }
+
+    fn apply_bulk(&mut self, ctx: &egui::Context, b: Bulk) {
+        let ids = std::mem::take(&mut self.main.picked);
+        let res: Result<(), rusqlite::Error> = match b {
+            Bulk::All => {
+                self.main.picked = self.list_ids();
+                self.main.confirm_bulk = false;
+                return;
+            }
+            Bulk::Clear => Ok(()),
+            Bulk::Copy => {
+                let bodies: Vec<String> = ids.iter().filter_map(|&id| self.db.get(id).ok()).map(|e| e.body).collect();
+                ctx.copy_text(bodies.join("\n\n"));
+                self.main.picked = ids;
+                return;
+            }
+            Bulk::Delete => ids.iter().try_for_each(|&id| self.db.delete_soft(id)),
+            Bulk::Restore => ids.iter().try_for_each(|&id| self.db.restore(id)),
+            Bulk::Purge if !self.main.confirm_bulk => {
+                self.main.picked = ids;
+                self.main.confirm_bulk = true;
+                return;
+            }
+            Bulk::Purge => ids.iter().try_for_each(|&id| self.db.delete_hard(id)),
+        };
+        if let Err(e) = res {
+            crate::log::error(format!("bulk action: {e}"));
+        }
+        self.main.confirm_bulk = false;
+        self.main.anchor = None;
+        self.main.stale = true;
+    }
+
+    // ---------- views ----------
+
     fn timeline_view(&mut self, ui: &mut Ui) {
         let dir = self.dir.clone();
+        let ctx = ui.ctx().clone();
         let today = Local::now().date_naive();
         let day = self.main.day;
         let mut step = 0i64;
+        let mut all = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new(theme::day_long(day, today)).family(theme::medium()).size(18.0));
             let events = self.main.items.iter().filter(|i| i.is_event).count();
@@ -563,6 +825,10 @@ impl App {
                 if ui.button("‹").clicked() {
                     step = -1;
                 }
+                if !self.main.items.is_empty() {
+                    ui.add_space(8.0);
+                    all = select_all_button(ui);
+                }
             });
         });
         ui.add_space(8.0);
@@ -570,46 +836,65 @@ impl App {
             self.set_day(day + Duration::days(step));
             return;
         }
+        if all {
+            self.apply_bulk(&ctx, Bulk::All);
+        }
+        if let Some(b) = self.bulk_bar(ui) {
+            self.apply_bulk(&ctx, b);
+        }
         if self.main.items.is_empty() {
             let caps = theme::hotkey_caps(&self.cfg.hotkeys.capture).join("+");
-            empty_note(
-                ui,
-                &t::empty_day(&caps),
-
-            );
+            empty_note(ui, &t::empty_day(&caps));
             return;
         }
-        let mut open = None;
+        let mut click = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for it in &self.main.items {
-                if row(ui, &dir, it, &hhmm(it.time), false).clicked() {
-                    open = Some(it.id);
+            for (i, it) in self.main.items.iter().enumerate() {
+                let time = hhmm(it.time);
+                let out = row(ui, &dir, it, self.opts(it, &time, false));
+                if out.toggled || out.resp.clicked() {
+                    click = Some((i, out.toggled));
                 }
             }
         });
-        if let Some(id) = open {
+        if let Some(id) = self.row_click(&ctx, click) {
             self.open_entry(id);
         }
     }
 
     fn named_view(&mut self, ui: &mut Ui) {
         let dir = self.dir.clone();
-        ui.label(RichText::new(t::NAMED).family(theme::medium()).size(18.0));
+        let ctx = ui.ctx().clone();
+        let mut all = false;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(t::NAMED).family(theme::medium()).size(18.0));
+            if !self.main.list.is_empty() {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| all = select_all_button(ui));
+            }
+        });
         ui.add_space(8.0);
+        if all {
+            self.apply_bulk(&ctx, Bulk::All);
+        }
+        if let Some(b) = self.bulk_bar(ui) {
+            self.apply_bulk(&ctx, b);
+        }
         if self.main.list.is_empty() {
             return empty_note(ui, t::EMPTY_NAMED);
         }
-        let mut open = None;
+        let mut click = None;
         let mut copy = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for it in &self.main.list {
+            for (i, it) in self.main.list.iter().enumerate() {
                 ui.horizontal(|ui| {
-                    if ui.small_button(t::BTN_COPY).clicked() {
-                        copy = Some(it.id);
-                    }
                     let d = date_of(it.time).map(theme::day_short).unwrap_or_default();
-                    if row(ui, &dir, it, &d, false).clicked() {
-                        open = Some(it.id);
+                    let w = ui.available_width() - 56.0;
+                    let out = ui.allocate_ui(egui::vec2(w, 32.0), |ui| row(ui, &dir, it, self.opts(it, &d, false))).inner;
+                    if out.toggled || out.resp.clicked() {
+                        click = Some((i, out.toggled));
+                    }
+                    if ui.small_button(t::BTN_COPY).on_hover_text(t::TIP_COPY_TEXT).clicked() {
+                        copy = Some(it.id);
                     }
                 });
             }
@@ -619,51 +904,64 @@ impl App {
         {
             ui.ctx().copy_text(e.body);
         }
-        if let Some(id) = open {
+        if let Some(id) = self.row_click(&ctx, click) {
             self.open_entry(id);
         }
     }
 
     fn trash_view(&mut self, ui: &mut Ui) {
         let dir = self.dir.clone();
-        ui.label(RichText::new(t::BIN).family(theme::medium()).size(18.0));
-        ui.add_space(8.0);
-        if self.main.list.is_empty() {
-            return empty_note(ui, t::EMPTY_BIN);
-        }
-        let mut restore = None;
-        let mut purge = None;
-        let confirm = self.main.confirm_purge;
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for it in &self.main.list {
-                ui.horizontal(|ui| {
-                    if ui.small_button(t::BTN_RESTORE).clicked() {
-                        restore = Some(it.id);
-                    }
-                    let label = if confirm == Some(it.id) { t::BTN_SURE } else { t::BTN_DELETE };
-                    if ui.small_button(RichText::new(label).color(theme::ERR)).clicked() {
-                        purge = Some(it.id);
-                    }
-                    let d = date_of(it.time).map(theme::day_short).unwrap_or_default();
-                    row(ui, &dir, it, &d, false);
+        let ctx = ui.ctx().clone();
+        let mut all = false;
+        let mut empty = false;
+        let confirm_empty = self.main.confirm_empty;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(t::BIN).family(theme::medium()).size(18.0));
+            if !self.main.list.is_empty() {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let lbl = if confirm_empty { t::BTN_SURE } else { t::BTN_EMPTY_BIN };
+                    empty = ui.button(RichText::new(lbl).color(theme::ERR)).clicked();
+                    ui.add_space(4.0);
+                    all = select_all_button(ui);
                 });
             }
         });
-        if let Some(id) = restore {
-            if let Err(e) = self.db.restore(id) {
-                crate::log::error(format!("restore: {e}"));
-            }
-            self.main.stale = true;
-        }
-        if let Some(id) = purge {
-            if confirm == Some(id) {
-                if let Err(e) = self.db.delete_hard(id) {
-                    crate::log::error(format!("delete: {e}"));
+        ui.add_space(8.0);
+        if empty {
+            if confirm_empty {
+                let ids = self.list_ids();
+                if let Err(e) = ids.iter().try_for_each(|&id| self.db.delete_hard(id)) {
+                    crate::log::error(format!("empty bin: {e}"));
                 }
+                self.main.picked.clear();
                 self.main.stale = true;
             } else {
-                self.main.confirm_purge = Some(id);
+                self.main.confirm_empty = true;
             }
+        }
+        if all {
+            self.apply_bulk(&ctx, Bulk::All);
+        }
+        if let Some(b) = self.bulk_bar(ui) {
+            self.apply_bulk(&ctx, b);
+        }
+        if self.main.list.is_empty() {
+            return empty_note(ui, t::EMPTY_BIN);
+        }
+        let mut click = None;
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            for (i, it) in self.main.list.iter().enumerate() {
+                let d = date_of(it.time).map(theme::day_short).unwrap_or_default();
+                let out = row(ui, &dir, it, self.opts(it, &d, false));
+                if out.toggled || out.resp.clicked() {
+                    click = Some((i, out.toggled));
+                }
+            }
+        });
+        // In the bin a plain click selects (entries there are not edited); the bar below acts.
+        if let Some((idx, toggled)) = click {
+            let (ctrl, shift) = ctx.input(|i| (i.modifiers.command, i.modifiers.shift));
+            self.pick(idx, ctrl || toggled || !shift, shift && !toggled);
         }
     }
 
@@ -682,9 +980,29 @@ impl App {
         }
         if r.changed() {
             self.main.sel = 0;
-            self.main.results = self.db.search(&self.main.query).unwrap_or_default();
+            self.main.picked.clear();
+            let q = crate::search::parse(&self.main.query);
+            self.main.query_err = match &q {
+                crate::search::Query::Bad(e) => Some(e.clone()),
+                _ => None,
+            };
+            self.main.results = self.db.search(&q).unwrap_or_default();
         }
         let n = self.main.results.len();
+        ui.horizontal(|ui| {
+            match &self.main.query_err {
+                Some(e) => ui.label(RichText::new(t::bad_pattern(e)).color(theme::WARN).size(11.5)),
+                None => ui.label(RichText::new(t::SEARCH_HELP).color(theme::FAINT).size(11.0)),
+            };
+            if n > 0 {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if select_all_button(ui) {
+                        self.main.picked = self.main.results.iter().map(|i| i.id).collect();
+                    }
+                    ui.label(RichText::new(t::results(n)).color(theme::WEAK).size(11.5));
+                });
+            }
+        });
         let (up, down, enter, shift) = ctx.input(|i| {
             (i.key_pressed(Key::ArrowUp), i.key_pressed(Key::ArrowDown), i.key_pressed(Key::Enter), i.modifiers.shift)
         });
@@ -696,28 +1014,32 @@ impl App {
                 self.main.sel = self.main.sel.saturating_sub(1);
             }
         }
-        ui.add_space(8.0);
+        ui.add_space(6.0);
+        if let Some(b) = self.bulk_bar(ui) {
+            self.apply_bulk(&ctx, b);
+        }
         if n == 0 {
-            if !self.main.query.trim().is_empty() {
+            if !self.main.query.trim().is_empty() && self.main.query_err.is_none() {
                 empty_note(ui, t::NO_MATCHES);
             }
             return;
         }
         let sel = self.main.sel;
-        let mut open = None;
+        let mut click = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (i, it) in self.main.results.iter().enumerate() {
                 let d = date_of(it.time).map(theme::day_short).unwrap_or_default();
-                let resp = row(ui, &dir, it, &d, i == sel);
+                let out = row(ui, &dir, it, self.opts(it, &d, i == sel));
                 if i == sel && (up || down) {
-                    resp.scroll_to_me(None);
+                    out.resp.scroll_to_me(None);
                 }
-                if resp.clicked() {
-                    open = Some(it.id);
+                if out.toggled || out.resp.clicked() {
+                    click = Some((i, out.toggled));
                 }
             }
         });
         let picked = self.main.results.get(sel).map(|i| i.id);
+        let mut open = self.row_click(&ctx, click);
         if enter && let Some(id) = picked {
             if shift {
                 return self.paste_entry(&ctx, id);

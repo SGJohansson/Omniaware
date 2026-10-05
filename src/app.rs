@@ -32,6 +32,8 @@ struct Signals {
     unflash: AtomicBool,
     main: AtomicBool,
     quit: AtomicBool,
+    /// Notice clicked: open this entry (0 = none).
+    open_entry: std::sync::atomic::AtomicI64,
 }
 
 fn poke(sig: &Signals, ctx: &egui::Context, flag: fn(&Signals) -> &AtomicBool) {
@@ -58,7 +60,8 @@ pub struct App {
     v_was_down: bool,
     /// Keep asking for the foreground until this moment (Windows may refuse the first try).
     focus_until: Option<std::time::Instant>,
-    last_stash: Option<String>,
+    /// Last Ctrl+C+C: clipboard key and the entry it became (a repeat is not stored twice).
+    last_stash: Option<(String, i64)>,
 
     pub(crate) capture: Option<Doc>,
     pub(crate) capture_naming: bool,
@@ -133,6 +136,13 @@ impl App {
         {
             let (s, c) = (sig.clone(), ctx.clone());
             win::on_double_copy(move || poke(&s, &c, |s| &s.stash));
+        }
+        {
+            let (s, c) = (sig.clone(), ctx.clone());
+            crate::notice::init(move |id| {
+                s.open_entry.store(id, SeqCst);
+                c.request_repaint();
+            });
         }
 
         let tray = match if cfg!(windows) { tray::build() } else { Err("tray: Windows only".into()) } {
@@ -286,8 +296,11 @@ impl App {
                 d.discard(&self.db);
             } else {
                 d.close(&self.db);
-                if d.has_content() {
+                if let doc::Status::Error(e) = &d.status {
+                    crate::notice::show(crate::notice::Notice::error(e.clone()));
+                } else if d.has_content() {
                     self.flash_tray(ctx);
+                    crate::notice::show(self.saved_notice(&d));
                 }
             }
         }
@@ -491,20 +504,65 @@ impl App {
             Clip::Text(t) => format!("t:{t}"),
             Clip::Image(r) => format!("i:{r}"),
         };
-        if self.last_stash.as_deref() != Some(key.as_str()) {
-            let res = match &clip {
-                Clip::Text(t) => self.db.insert(t).and_then(|id| self.db.add_revision(id, t)),
-                Clip::Image(r) => self.db.insert("").and_then(|id| self.db.add_attachment(id, r)).map(|_| ()),
-            };
-            match res {
-                Ok(()) => {
-                    self.main.stale = true;
-                    self.last_stash = Some(key);
+        let (title, id) = match &self.last_stash {
+            Some((k, id)) if *k == key => (t::NOTICE_ALREADY, *id),
+            _ => {
+                let res = match &clip {
+                    Clip::Text(s) => self.db.insert(s).and_then(|id| self.db.add_revision(id, s).map(|()| id)),
+                    Clip::Image(r) => self.db.insert("").and_then(|id| self.db.add_attachment(id, r).map(|_| id)),
+                };
+                match res {
+                    Ok(id) => {
+                        self.main.stale = true;
+                        self.last_stash = Some((key, id));
+                        (t::NOTICE_CAPTURED, id)
+                    }
+                    Err(e) => {
+                        log::error(format!("silent capture: {e}"));
+                        return crate::notice::show(crate::notice::Notice::error(e.to_string()));
+                    }
                 }
-                Err(e) => return log::error(format!("silent capture: {e}")),
             }
-        }
+        };
+        let detail = match &clip {
+            Clip::Text(s) => {
+                let line = s.split_whitespace().collect::<Vec<_>>().join(" ");
+                let mut d: String = line.chars().take(70).collect();
+                if line.chars().count() > 70 {
+                    d.push('…');
+                }
+                d
+            }
+            Clip::Image(r) => {
+                let m = doc::meta(&self.dir, r);
+                let size = m.as_ref().map(|m| crate::notice::detail(0, 1, m.bytes)).unwrap_or_default();
+                match m {
+                    Some(m) => format!("{size} · {}×{} px", m.w, m.h),
+                    None => size,
+                }
+            }
+        };
+        let today = theme::day_short(chrono::Local::now().date_naive());
+        crate::notice::show(crate::notice::Notice::ok(title, format!("{} · {today}", t::JOURNAL), detail, Some(id)));
         self.flash_tray(ctx);
+    }
+
+    /// "✓ Saved · Journal · Mon 5 Oct" / "42 words · 1 image · 270.7 kB".
+    fn saved_notice(&self, d: &Doc) -> crate::notice::Notice {
+        let context = match &d.saved_name {
+            Some(n) => format!("{} · {n}", t::NAMED),
+            None => format!("{} · {}", t::JOURNAL, theme::day_short(chrono::Local::now().date_naive())),
+        };
+        let words = d.body.split_whitespace().count();
+        let mut seen = std::collections::HashSet::new();
+        let bytes = d
+            .images
+            .iter()
+            .filter(|i| seen.insert(i.blob.as_str()))
+            .filter_map(|i| doc::meta(&self.dir, &i.blob))
+            .map(|m| m.bytes)
+            .sum();
+        crate::notice::Notice::ok(t::NOTICE_SAVED, context, crate::notice::detail(words, d.images.len(), bytes), d.id)
     }
 
     /// Short green flash of the tray icon: "it's on disk".
@@ -632,6 +690,14 @@ impl eframe::App for App {
         }
         if self.sig.stash.swap(false, SeqCst) {
             self.stash(ctx);
+        }
+        let open = self.sig.open_entry.swap(0, SeqCst);
+        if open != 0 {
+            if self.mode == Mode::Capture {
+                self.finish_capture(ctx, false);
+            }
+            self.open_main(ctx);
+            self.open_entry(open);
         }
         if self.sig.unflash.swap(false, SeqCst)
             && let Some(t) = &self.tray

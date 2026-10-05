@@ -104,6 +104,9 @@ pub struct Item {
     pub words: usize,
     /// Bare links in the text body.
     pub links: usize,
+    /// Search results only: the matching line and the match ranges in it.
+    pub snippet: String,
+    pub marks: Vec<std::ops::Range<usize>>,
     /// Display time: `starts` for events in range, else `created` (or `updated`/`deleted` for lists).
     pub time: i64,
     pub is_event: bool,
@@ -180,6 +183,8 @@ fn item_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item> {
             .unwrap_or_default(),
         words: body.split_whitespace().filter(|w| !w.starts_with("![](")).count(),
         links: crate::markup::find_links(&body).len(),
+        snippet: String::new(),
+        marks: Vec::new(),
         time: r.get(3)?,
         is_event: r.get::<_, i64>(4)? != 0,
     })
@@ -227,16 +232,6 @@ fn strip_blob_refs(body: &str) -> String {
     tidy.join("\n")
 }
 
-/// Turns user input into an FTS5 prefix query: every token must match (`"tok"*`).
-fn fts_query(q: &str) -> Option<String> {
-    let toks: Vec<String> = q
-        .split_whitespace()
-        .map(|t| t.replace('"', ""))
-        .filter(|t| !t.is_empty())
-        .map(|t| format!("\"{t}\"*"))
-        .collect();
-    (!toks.is_empty()).then(|| toks.join(" "))
-}
 
 impl Db {
     pub fn open(path: &Path) -> Result<Self> {
@@ -484,16 +479,30 @@ impl Db {
         st.query_map([], item_row)?.collect()
     }
 
-    /// Full-text search (prefix match on every word), best first.
-    pub fn search(&self, q: &str) -> Result<Vec<Item>> {
-        let Some(fq) = fts_query(q) else { return Ok(Vec::new()) };
+    /// Search every live entry (see `search::parse`): best score first, then newest.
+    pub fn search(&self, q: &crate::search::Query) -> Result<Vec<Item>> {
+        let crate::search::Query::All(pats) = q else { return Ok(Vec::new()) };
         let mut st = self.conn.prepare_cached(&format!(
             "SELECT e.id, e.name, e.body, e.created, 0, {ATT_COLS}
-             FROM entry_fts f JOIN entry e ON e.id = f.rowid
-             WHERE entry_fts MATCH ?1 AND e.deleted IS NULL
-             ORDER BY rank LIMIT 60"
+             FROM entry e WHERE e.deleted IS NULL ORDER BY e.created DESC"
         ))?;
-        st.query_map([fq], item_row)?.collect()
+        let rows = st.query_map([], |r| {
+            let name: Option<String> = r.get(1)?;
+            let body: String = r.get(2)?;
+            Ok((item_row(r)?, name.unwrap_or_default(), body))
+        })?;
+        let mut hits = Vec::new();
+        for row in rows {
+            let (mut it, name, body) = row?;
+            if let Some(h) = crate::search::hit(pats, &name, &body) {
+                it.snippet = h.snippet;
+                it.marks = h.marks;
+                hits.push((h.score, it));
+            }
+        }
+        // Stable sort keeps newest-first among equal scores.
+        hits.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+        Ok(hits.into_iter().take(200).map(|(_, it)| it).collect())
     }
 }
 
@@ -556,8 +565,9 @@ mod tests {
         let n: i64 = db.conn.query_row("SELECT count(*) FROM revision", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
         let ids = |v: Vec<Item>| v.into_iter().map(|i| i.id).collect::<Vec<_>>();
-        assert_eq!(ids(db.search("åäö").unwrap()), vec![a]);
-        assert_eq!(ids(db.search("vär").unwrap()), vec![a]); // prefix
+        assert_eq!(ids(db.search(&crate::search::parse("åäö")).unwrap()), vec![a]);
+        assert_eq!(ids(db.search(&crate::search::parse("vär")).unwrap()), vec![a]); // prefix
+        assert_eq!(ids(db.search(&crate::search::parse("ärld")).unwrap()), vec![a]); // inside a word
 
         db.set_name(a, "adress").unwrap();
         let b = db.insert("ny adress").unwrap();
@@ -567,7 +577,7 @@ mod tests {
         let a_body: String =
             db.conn.query_row("SELECT body FROM entry WHERE id=?1", [a], |r| r.get(0)).unwrap();
         assert_eq!(a_body, "hej världen, åäö");
-        assert_eq!(ids(db.search("adress").unwrap()), vec![b]);
+        assert_eq!(ids(db.search(&crate::search::parse("adress")).unwrap()), vec![b]);
         assert_eq!(db.named().unwrap().len(), 1);
 
         let day = db.day_items(0, i64::MAX).unwrap();
@@ -575,13 +585,13 @@ mod tests {
         assert_eq!(db.stamps_between(0, i64::MAX).unwrap().len(), 2);
 
         db.delete_soft(b).unwrap();
-        assert!(db.search("adress").unwrap().is_empty());
+        assert!(db.search(&crate::search::parse("adress")).unwrap().is_empty());
         assert_eq!(db.trash().unwrap().len(), 1);
         db.restore(b).unwrap();
         assert_eq!(db.trash().unwrap().len(), 0);
 
         db.delete_hard(a).unwrap();
-        assert!(db.search("världen").unwrap().is_empty());
-        assert!(db.search("\"").unwrap().is_empty());
+        assert!(db.search(&crate::search::parse("världen")).unwrap().is_empty());
+        assert!(db.search(&crate::search::parse("\"")).unwrap().is_empty());
     }
 }

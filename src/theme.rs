@@ -221,25 +221,22 @@ pub fn info_chip(ui: &mut Ui, w: u32, h: u32, size: (&str, &str), font: f32) {
     ui.painter().galley(rect.min, g, TEXT);
 }
 
-/// voidflow badge + "voidflow.tech ↗"; the whole row is the link. Returns true when clicked.
+/// voidflow badge + "voidflow.tech ↗" as one clickable unit (painted, so it works in any layout).
 pub fn site_link(ui: &mut Ui) -> bool {
-    let icon = egui::Image::from_bytes("bytes://voidflow.png", include_bytes!("../assets/brand/voidflow.png"))
-        .fit_to_exact_size(egui::vec2(20.0, 20.0));
-    let r = ui
-        .horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            ui.add(icon);
-            ui.label(RichText::new("voidflow.tech ↗").size(11.0).color(FAINT));
-        })
-        .response
-        .interact(egui::Sense::click())
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(SITE_URL);
-    if r.hovered() {
-        let x = egui::Rangef::new(r.rect.left() + 26.0, r.rect.right());
-        ui.painter().hline(x, r.rect.bottom(), Stroke::new(1.0, ACCENT.gamma_multiply(0.6)));
+    let icon = egui::Image::from_bytes("bytes://voidflow.png", include_bytes!("../assets/brand/voidflow.png"));
+    let g = ui.fonts_mut(|f| f.layout_no_wrap("voidflow.tech ↗".into(), egui::FontId::monospace(11.5), WEAK));
+    let (isz, gap) = (20.0, 6.0);
+    let size = egui::vec2(isz + gap + g.size().x, isz.max(g.size().y));
+    let (rect, r) = ui.allocate_exact_size(size, egui::Sense::click());
+    let hot = r.hovered();
+    icon.paint_at(ui, egui::Rect::from_min_size(rect.min + egui::vec2(0.0, (size.y - isz) / 2.0), egui::vec2(isz, isz)));
+    let tp = egui::pos2(rect.left() + isz + gap, rect.center().y - g.size().y / 2.0);
+    let gw = g.size().x;
+    ui.painter().galley(tp, g, if hot { TEXT } else { Color32::from_rgb(104, 108, 116) });
+    if hot {
+        ui.painter().hline(egui::Rangef::new(tp.x, tp.x + gw), rect.bottom(), Stroke::new(1.0, ACCENT.gamma_multiply(0.6)));
     }
-    r.clicked()
+    r.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(SITE_URL).clicked()
 }
 
 /// Opens a URL in the default browser.
