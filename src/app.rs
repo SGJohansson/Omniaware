@@ -56,6 +56,8 @@ pub struct App {
     prev_fg: isize,
     main_rect: Option<win::Rect>,
     v_was_down: bool,
+    /// Keep asking for the foreground until this moment (Windows may refuse the first try).
+    focus_until: Option<std::time::Instant>,
     last_stash: Option<String>,
 
     pub(crate) capture: Option<Doc>,
@@ -177,6 +179,7 @@ impl App {
             prev_fg: 0,
             main_rect: None,
             v_was_down: false,
+            focus_until: None,
             last_stash: None,
             capture: None,
             capture_naming: false,
@@ -190,21 +193,32 @@ impl App {
 
     // ---------- mode switching ----------
 
-    fn show(&self, ctx: &egui::Context, capture: bool) {
+    fn show(&mut self, ctx: &egui::Context, capture: bool) {
         let w = &self.cfg.window;
         if capture {
             win::place(self.hwnd, None, (w.width, w.height), true, false);
         } else {
             win::place(self.hwnd, self.main_rect, (w.main_width, w.main_height), false, true);
         }
+        // No ViewportCommand::Focus: winit's fallback for it fakes an Alt tap (see win::activate).
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(ViewportCommand::Focus);
+        self.focus_until = Some(std::time::Instant::now() + std::time::Duration::from_millis(600));
+    }
+
+    /// Retries activation for a short while after showing; until then keys may go to the app behind.
+    fn ensure_focus(&mut self, ctx: &egui::Context) {
+        let Some(until) = self.focus_until else { return };
+        if win::activate(self.hwnd) || std::time::Instant::now() > until {
+            self.focus_until = None;
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(40));
+        }
     }
 
     pub(crate) fn open_capture(&mut self, ctx: &egui::Context) {
         match self.mode {
             Mode::Capture => {
-                ctx.send_viewport_cmd(ViewportCommand::Focus);
+                win::activate(self.hwnd);
                 return;
             }
             Mode::Main => {
@@ -284,7 +298,7 @@ impl App {
     pub(crate) fn open_main(&mut self, ctx: &egui::Context) {
         match self.mode {
             Mode::Main => {
-                ctx.send_viewport_cmd(ViewportCommand::Focus);
+                win::activate(self.hwnd);
                 return;
             }
             Mode::Capture => {
@@ -335,7 +349,6 @@ impl App {
         let Some(img) = self.lightbox.clone() else { return };
         let r = img.blob.clone();
         let uri = doc::blob_uri(&self.dir, &r);
-        let info = doc::meta_line(&self.dir, &r);
         let max = ctx.content_rect().size() * egui::vec2(0.85, 0.75);
         let mut close = false;
         let mut act = None;
@@ -358,26 +371,26 @@ impl App {
                 let b = |ui: &mut egui::Ui, t: &str, c: egui::Color32| {
                     ui.add(egui::Button::new(egui::RichText::new(t).size(12.5).color(c))).clicked()
                 };
-                if b(ui, "Kopiera", theme::TEXT) {
+                if b(ui, "kopiera", theme::TEXT) {
                     act = Some(doc::ImgAction::Copy(r.clone()));
                 }
-                if b(ui, "Spara som…", theme::TEXT) {
+                if b(ui, "spara som…", theme::TEXT) {
                     act = Some(doc::ImgAction::SaveAs(r.clone()));
                 }
-                if b(ui, "Öppna med…", theme::TEXT) {
+                if b(ui, "öppna med…", theme::TEXT) {
                     act = Some(doc::ImgAction::OpenWith(r.clone()));
                 }
-                if b(ui, "Visa i mapp", theme::TEXT) {
+                if b(ui, "visa i mapp", theme::TEXT) {
                     act = Some(doc::ImgAction::Reveal(r.clone()));
                 }
-                if b(ui, "Ta bort", theme::ERR) {
+                if b(ui, "ta bort", theme::ERR) {
                     act = Some(doc::ImgAction::Remove(vec![img.id]));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    close = b(ui, "Stäng", theme::TEXT);
-                    ui.label(egui::RichText::new("Esc").color(theme::WEAK).size(12.0));
-                    ui.add_space(10.0);
-                    ui.label(egui::RichText::new(&info).color(theme::WEAK).size(12.0));
+                    close = theme::quiet_button(ui, "stäng").clicked();
+                    theme::key_hint(ui, &["esc"]);
+                    ui.add_space(12.0);
+                    doc::info_chip(ui, &self.dir, &r, 11.5);
                 });
             });
         });
@@ -531,34 +544,46 @@ impl App {
     fn dup_prompt_ui(&mut self, ctx: &egui::Context) {
         let Some((blob, n)) = self.dup_prompt.clone() else { return };
         let mut answer = None;
+        let dir = self.dir.clone();
         let resp = egui::Modal::new(egui::Id::new("dup_prompt")).show(ctx, |ui| {
-            ui.set_max_width(360.0);
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::Image::new(doc::blob_uri(&self.dir, &blob))
-                        .fit_to_exact_size(egui::vec2(96.0, 64.0))
-                        .maintain_aspect_ratio(true)
-                        .corner_radius(4),
-                );
+            ui.set_width(400.0);
+            // 1) what happened  2) why it is harmless  3) the data — each in its own weight/colour
+            ui.horizontal_top(|ui| {
+                egui::Frame::new()
+                    .stroke(egui::Stroke::new(1.0, theme::ACCENT_DIM))
+                    .corner_radius(4)
+                    .inner_margin(egui::Margin::same(2))
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Image::new(doc::blob_uri(&dir, &blob))
+                                .fit_to_exact_size(egui::vec2(104.0, 68.0))
+                                .maintain_aspect_ratio(true)
+                                .corner_radius(3),
+                        );
+                    });
+                ui.add_space(4.0);
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(format!("Bilden är identisk med #{n}.")).family(theme::medium()));
-                    ui.label(
-                        egui::RichText::new("En kopia återanvänder samma fil – inget extra utrymme.")
-                            .color(theme::WEAK)
-                            .size(12.0),
-                    );
-                    ui.label(egui::RichText::new(doc::meta_line(&self.dir, &blob)).color(theme::WEAK).size(12.0));
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.label(egui::RichText::new(format!("Bilden är identisk med #{n}")).family(theme::medium()));
+                    ui.label(egui::RichText::new("Kopian delar fil – tar ingen plats").color(theme::WEAK).size(11.5));
+                    ui.add_space(10.0);
+                    doc::info_chip(ui, &dir, &blob, 11.5);
                 });
             });
-            ui.add_space(8.0);
+            ui.add_space(10.0);
+            let line = ui.available_rect_before_wrap();
+            ui.painter().hline(line.x_range(), line.top(), egui::Stroke::new(1.0, theme::LINE));
+            ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if ui.button(egui::RichText::new("Lägg till kopia").color(theme::ACCENT)).clicked() {
+                if theme::primary_button(ui, "lägg till kopia").clicked() {
                     answer = Some(true);
                 }
-                if ui.button("Avbryt").clicked() {
+                if theme::quiet_button(ui, "avbryt").clicked() {
                     answer = Some(false);
                 }
-                ui.label(egui::RichText::new("Enter / Esc").color(theme::WEAK).size(12.0));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    theme::key_hint(ui, &["esc", "enter"]);
+                });
             });
         });
         if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -643,12 +668,14 @@ impl eframe::App for App {
                 ctx.send_viewport_cmd(ViewportCommand::Visible(false));
             }
             Mode::Capture => {
+                self.ensure_focus(&ctx);
                 self.poll_image_paste(&ctx);
                 self.capture_ui(ui);
                 self.lightbox_ui(&ctx);
                 self.dup_prompt_ui(&ctx);
             }
             Mode::Main => {
+                self.ensure_focus(&ctx);
                 self.poll_image_paste(&ctx);
                 self.main_ui(ui);
                 self.lightbox_ui(&ctx);

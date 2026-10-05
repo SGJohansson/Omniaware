@@ -14,14 +14,14 @@ mod imp {
     use super::Rect;
     use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, POINT, RECT};
     use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
-    use windows::Win32::System::Threading::CreateMutexW;
+    use windows::Win32::System::Threading::{AttachThreadInput, CreateMutexW, GetCurrentThreadId};
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
+        GetAsyncKeyState, INPUT, SetFocus, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
         VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GWL_EXSTYLE, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HWND_NOTOPMOST, HWND_TOPMOST,
+        BringWindowToTop, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, GetWindowLongPtrW, GetWindowRect, HWND_NOTOPMOST, HWND_TOPMOST,
         SW_HIDE, SW_SHOW, SWP_FRAMECHANGED, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
         WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
     };
@@ -102,7 +102,33 @@ mod imp {
             let z = if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST };
             let _ = SetWindowPos(wnd, Some(z), r.x, r.y, r.w, r.h, SWP_FRAMECHANGED);
             let _ = ShowWindow(wnd, SW_SHOW);
+        }
+        activate(h);
+    }
+
+    /// Foreground + keyboard focus. Borrows the input queue of the current foreground thread
+    /// instead of faking an Alt tap (winit's fallback), which can leave the previous app in
+    /// menu mode where every key press dings. Returns whether we are in front now.
+    pub fn activate(h: isize) -> bool {
+        if h == 0 {
+            return false;
+        }
+        unsafe {
+            let wnd = hwnd(h);
+            let fg = GetForegroundWindow();
+            if fg == wnd {
+                return true;
+            }
+            let me = GetCurrentThreadId();
+            let other = if fg.is_invalid() { 0 } else { GetWindowThreadProcessId(fg, None) };
+            let attached = other != 0 && other != me && AttachThreadInput(me, other, true).as_bool();
+            let _ = BringWindowToTop(wnd);
             let _ = SetForegroundWindow(wnd);
+            let _ = SetFocus(Some(wnd));
+            if attached {
+                let _ = AttachThreadInput(me, other, false);
+            }
+            GetForegroundWindow() == wnd
         }
     }
 
@@ -262,6 +288,9 @@ mod imp {
         None
     }
     pub fn place(_h: isize, _rect: Option<Rect>, _size: (f32, f32), _topmost: bool, _taskbar: bool) {}
+    pub fn activate(_h: isize) -> bool {
+        true
+    }
     pub fn paste_to(_target: isize, _text: String) {}
     pub fn on_double_copy(_f: impl Fn() + Send + Sync + 'static) {}
 }

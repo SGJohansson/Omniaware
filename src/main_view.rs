@@ -364,7 +364,7 @@ impl App {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             close = ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Stäng (Esc)").clicked();
                             ui.add_space(6.0);
-                            new = ui.button("+ Nytt").on_hover_text("Ctrl+N").clicked();
+                            new = ui.button("+ nytt").on_hover_text("Ctrl+N").clicked();
                         });
                     })
 ;
@@ -474,9 +474,14 @@ impl App {
                     });
                 }
                 ui.add_space(6.0);
-                if ui.add(egui::Button::new(RichText::new("Idag").size(12.0)).min_size(egui::vec2(ui.available_width(), 24.0))).clicked() {
+                if ui.add(egui::Button::new(RichText::new("idag").size(12.0)).min_size(egui::vec2(ui.available_width(), 24.0))).clicked() {
                     pick_day = Some(today);
                 }
+                ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+                    if theme::site_link(ui) {
+                        theme::open_url(theme::SITE_URL);
+                    }
+                });
             });
         if month_step != 0 {
             let m = self.main.month;
@@ -692,10 +697,10 @@ impl App {
         // Row 1: navigation + name on the left, actions on the right. Row 2: timestamp.
         // Buttons are placed first (right-to-left) so a narrow window shrinks the name field, not them.
         ui.horizontal(|ui| {
-            back = ui.button("← Tillbaka").clicked();
+            back = ui.button("← tillbaka").clicked();
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                discard = ui.button(RichText::new("Kasta").color(theme::ERR)).clicked();
-                let lbl = if ed.preview { "Redigera" } else { "Förhandsvisa" };
+                discard = ui.button(RichText::new("kasta").color(theme::ERR)).clicked();
+                let lbl = if ed.preview { "redigera" } else { "förhandsvisa" };
                 if ui.button(lbl).on_hover_text("Ctrl+E").clicked() {
                     ed.preview = !ed.preview;
                     ed.focus = !ed.preview;

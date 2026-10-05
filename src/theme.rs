@@ -198,3 +198,107 @@ pub fn shortcut_groups(ui: &mut Ui, groups: &[Group]) {
         ui.add_space(10.0);
     }
 }
+
+// ---------- buttons, hints, info chips ----------
+
+/// Brackets and separators in data chips.
+pub const FAINT: Color32 = Color32::from_rgb(78, 82, 92);
+pub const SITE_URL: &str = "https://voidflow.tech/";
+
+/// Primary action: lowercase label in accent, dim fill, 2 px accent underline.
+pub fn primary_button(ui: &mut Ui, text: &str) -> egui::Response {
+    let r = ui.add(
+        egui::Button::new(RichText::new(text).color(ACCENT))
+            .fill(Color32::from_rgb(26, 44, 43))
+            .stroke(Stroke::NONE)
+            .corner_radius(4),
+    );
+    let x = egui::Rangef::new(r.rect.left() + 3.0, r.rect.right() - 3.0);
+    ui.painter().hline(x, r.rect.bottom() - 1.0, Stroke::new(2.0, if r.hovered() { ACCENT } else { ACCENT.gamma_multiply(0.7) }));
+    r
+}
+
+/// Secondary action: lowercase, grey, thin outline; a red underline on hover.
+pub fn quiet_button(ui: &mut Ui, text: &str) -> egui::Response {
+    let r = ui.add(
+        egui::Button::new(RichText::new(text).color(WEAK))
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::new(1.0, LINE))
+            .corner_radius(4),
+    );
+    if r.hovered() {
+        let x = egui::Rangef::new(r.rect.left() + 3.0, r.rect.right() - 3.0);
+        ui.painter().hline(x, r.rect.bottom() - 1.0, Stroke::new(2.0, ERR.gamma_multiply(0.8)));
+    }
+    r
+}
+
+/// Tiny dim keycaps ("enter" "esc") for corner hints.
+pub fn key_hint(ui: &mut Ui, keys: &[&str]) {
+    ui.spacing_mut().item_spacing.x = 4.0;
+    for k in keys {
+        egui::Frame::new()
+            .fill(BG_SIDE)
+            .stroke(Stroke::new(1.0, Color32::from_rgb(52, 55, 62)))
+            .corner_radius(3)
+            .inner_margin(egui::Margin::symmetric(4, 0))
+            .show(ui, |ui| ui.label(RichText::new(*k).size(10.0).color(WEAK)));
+    }
+}
+
+/// Multi-colour monospace text as one galley.
+pub fn runs(ui: &Ui, parts: &[(&str, Color32)], size: f32) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::default();
+    for (t, c) in parts {
+        job.append(t, 0.0, egui::TextFormat::simple(egui::FontId::monospace(size), *c));
+    }
+    ui.fonts_mut(|f| f.layout_job(job))
+}
+
+/// "[ 265×114 px │ 5.8 kB ]": numbers in accent, units dim, brackets faint.
+pub fn info_chip(ui: &mut Ui, w: u32, h: u32, size: (&str, &str), font: f32) {
+    let (w, h) = (w.to_string(), h.to_string());
+    let g = runs(
+        ui,
+        &[
+            ("[ ", FAINT),
+            (&w, ACCENT),
+            ("×", TEXT),
+            (&h, ACCENT),
+            (" px", WEAK),
+            (" │ ", FAINT),
+            (size.0, ACCENT),
+            (" ", WEAK),
+            (size.1, WEAK),
+            (" ]", FAINT),
+        ],
+        font,
+    );
+    let (rect, _) = ui.allocate_exact_size(g.size(), egui::Sense::hover());
+    ui.painter().galley(rect.min, g, TEXT);
+}
+
+/// Small "voidflow.tech ↗" link; returns true when clicked.
+pub fn site_link(ui: &mut Ui) -> bool {
+    let r = ui
+        .add(egui::Label::new(RichText::new("voidflow.tech ↗").size(11.0).color(FAINT)).sense(egui::Sense::click()))
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(SITE_URL);
+    if r.hovered() {
+        let x = egui::Rangef::new(r.rect.left(), r.rect.right());
+        ui.painter().hline(x, r.rect.bottom(), Stroke::new(1.0, ACCENT.gamma_multiply(0.6)));
+    }
+    r.clicked()
+}
+
+/// Opens a URL in the default browser.
+pub fn open_url(url: &str) {
+    let r = if cfg!(windows) {
+        std::process::Command::new("explorer.exe").arg(url).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(url).spawn()
+    };
+    if let Err(e) = r {
+        crate::log::error(format!("öppna {url}: {e}"));
+    }
+}

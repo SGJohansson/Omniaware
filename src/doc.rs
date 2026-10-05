@@ -16,7 +16,9 @@ const TOAST_HOLD: f32 = 2.5;
 const TOAST_OUT: f32 = 0.6;
 pub const THUMB: egui::Vec2 = egui::vec2(160.0, 96.0);
 pub const THUMB_LARGE: egui::Vec2 = egui::vec2(200.0, 120.0);
-/// Autosave pulse on the status dot.
+/// Unsaved for longer than this turns the dot amber.
+const STUCK: Duration = Duration::from_secs(2);
+/// Ring on the status dot after an explicit save.
 const PULSE: f32 = 0.7;
 
 pub enum Status {
@@ -147,7 +149,7 @@ impl Doc {
             Ok(()) => {
                 self.dirty = false;
                 if self.id.is_some() {
-                    self.mark_saved();
+                    self.mark_saved(false);
                 }
             }
             Err(e) => self.fail(format!("sparning: {e}")),
@@ -291,7 +293,7 @@ impl Doc {
         match db.add_attachment(id, &blob) {
             Ok(aid) => {
                 self.images.push(Img { id: aid, blob });
-                self.mark_saved();
+                self.mark_saved(true);
                 Attach::Added
             }
             Err(e) => {
@@ -306,15 +308,18 @@ impl Doc {
         self.images.retain(|x| x.id != aid);
         self.selected.retain(|x| *x != aid);
         match db.remove_attachment(aid) {
-            Ok(()) => self.mark_saved(),
+            Ok(()) => self.mark_saved(true),
             Err(e) => self.fail(format!("bild: {e}")),
         }
     }
 
-    /// Autosave bookkeeping: status + dot pulse, no text.
-    fn mark_saved(&mut self) {
+    /// Save bookkeeping. Routine text autosaves stay silent; `pulse` (one ring on the dot)
+    /// is reserved for things the user did on purpose: Ctrl+S, adding or removing an image.
+    fn mark_saved(&mut self, pulse: bool) {
         self.status = Status::Saved(chrono::Local::now().format("%H:%M:%S").to_string());
-        self.pulse = Some(Instant::now());
+        if pulse {
+            self.pulse = Some(Instant::now());
+        }
     }
 
     /// Ctrl+S: write now, store a version and say so.
@@ -326,7 +331,10 @@ impl Doc {
             return;
         };
         match db.add_revision(id, &self.body).and_then(|()| db.revision_count(id)) {
-            Ok(n) => self.show_toast(format!("✓ Sparad · version {n}")),
+            Ok(n) => {
+                self.pulse = Some(Instant::now());
+                self.show_toast(format!("✓ Sparad · version {n}"));
+            }
             Err(e) => self.fail(format!("version: {e}")),
         }
     }
@@ -345,12 +353,14 @@ impl Doc {
         (fade_in * fade_out).clamp(0.0, 1.0)
     }
 
-    /// Permanent state: a small dot (grey = empty, amber = unsaved, green = on disk, red = error).
-    /// Each autosave sends a short ring out from the dot.
+    /// Calm, steady dot: grey = empty, green = on disk, red = error. Amber only when a change
+    /// has stayed unsaved for longer than expected (normal typing never shows it).
     pub fn indicator(&self, ui: &mut Ui) {
+        let stuck = self.dirty && self.last_edit.elapsed() > STUCK;
         let (col, tip) = match &self.status {
             Status::Error(e) => (theme::ERR, e.clone()),
-            _ if self.dirty => (theme::WARN, "Osparade ändringar – sparas automatiskt strax".to_string()),
+            _ if stuck => (theme::WARN, "Ändringar väntar på att sparas".to_string()),
+            _ if self.dirty && matches!(self.status, Status::Idle) => (theme::WEAK, "Sparas automatiskt".to_string()),
             Status::Saved(t) => (theme::OK, format!("Allt ligger på disk (senast {t}). Ctrl+S sparar en version.")),
             Status::Clean => (theme::OK, "Allt ligger på disk. Ctrl+S sparar en version.".to_string()),
             Status::Idle => (theme::WEAK, "Inget att spara än".to_string()),
@@ -514,12 +524,12 @@ pub struct Meta {
     pub w: u32,
     pub h: u32,
     pub bytes: u64,
-    pub ext: String,
 }
 
 static META: LazyLock<Mutex<HashMap<String, Option<Meta>>>> = LazyLock::new(Default::default);
 
 /// File size + pixel dimensions (header only) of a blob, cached for the session.
+/// (Format is not tracked: every stored image is PNG.)
 pub fn meta(dir: &Path, blob: &str) -> Option<Meta> {
     let mut cache = META.lock().unwrap_or_else(|e| e.into_inner());
     cache
@@ -528,8 +538,7 @@ pub fn meta(dir: &Path, blob: &str) -> Option<Meta> {
             let path = blob_path(dir, blob);
             let bytes = std::fs::metadata(&path).ok()?.len();
             let (w, h) = image::image_dimensions(&path).ok()?;
-            let ext = blob.rsplit_once('.').map(|(_, e)| e).unwrap_or("png").to_uppercase();
-            Some(Meta { w, h, bytes, ext })
+            Some(Meta { w, h, bytes })
         })
         .clone()
 }
@@ -543,35 +552,33 @@ pub fn fmt_size(bytes: u64) -> (String, &'static str) {
     }
 }
 
-/// "1920×1080 px · 23.8 kB · PNG" (for the lightbox toolbar).
-pub fn meta_line(dir: &Path, blob: &str) -> String {
-    meta(dir, blob)
-        .map(|m| {
-            let (v, u) = fmt_size(m.bytes);
-            format!("{}×{} px · {v} {u} · {}", m.w, m.h, m.ext)
-        })
-        .unwrap_or_default()
+/// "[ 1920×1080 px │ 23.8 kB ]" for a blob (nothing if the file is unreadable).
+pub fn info_chip(ui: &mut Ui, dir: &Path, blob: &str, font: f32) {
+    if let Some(m) = meta(dir, blob) {
+        let (v, u) = fmt_size(m.bytes);
+        theme::info_chip(ui, m.w, m.h, (&v, u), font);
+    }
 }
 
 /// Context menu shared by tiles and the lightbox. `targets` = attachment ids "Ta bort" applies to.
 pub fn image_menu(ui: &mut Ui, blob: &str, targets: Vec<i64>) -> Option<ImgAction> {
     let mut act = None;
     let item = |ui: &mut Ui, label: &str| ui.button(egui::RichText::new(label).size(13.0)).clicked();
-    if item(ui, "Kopiera") {
+    if item(ui, "kopiera") {
         act = Some(ImgAction::Copy(blob.to_string()));
     }
-    if item(ui, "Spara som…") {
+    if item(ui, "spara som…") {
         act = Some(ImgAction::SaveAs(blob.to_string()));
     }
-    if item(ui, "Öppna med…") {
+    if item(ui, "öppna med…") {
         act = Some(ImgAction::OpenWith(blob.to_string()));
     }
-    if item(ui, "Visa i mapp") {
+    if item(ui, "visa i mapp") {
         act = Some(ImgAction::Reveal(blob.to_string()));
     }
     ui.separator();
     let n = targets.len();
-    let label = if n > 1 { format!("Ta bort {n} bilder") } else { "Ta bort".to_string() };
+    let label = if n > 1 { format!("ta bort {n} bilder") } else { "ta bort".to_string() };
     if ui.button(egui::RichText::new(label).size(13.0).color(theme::ERR)).clicked() {
         act = Some(ImgAction::Remove(targets));
     }
@@ -584,14 +591,7 @@ pub fn image_menu(ui: &mut Ui, blob: &str, targets: Vec<i64>) -> Option<ImgActio
 const SHADE: egui::Color32 = egui::Color32::from_rgba_premultiplied(12, 13, 15, 214);
 const COPY_FG: egui::Color32 = egui::Color32::from_rgb(159, 225, 203);
 
-/// Multi-colour text: (text, colour) runs in one galley.
-fn runs(ui: &Ui, parts: &[(&str, egui::Color32)], size: f32) -> std::sync::Arc<egui::Galley> {
-    let mut job = egui::text::LayoutJob::default();
-    for (t, c) in parts {
-        job.append(t, 0.0, egui::TextFormat::simple(egui::FontId::monospace(size), *c));
-    }
-    ui.fonts_mut(|f| f.layout_job(job))
-}
+use theme::runs;
 
 /// Image tile: click = select, Ctrl+click = multi-select, double-click = enlarge, right-click = menu.
 /// Always shows "#n" (and "kopia av #m") top-left and a "W×H · size" badge bottom-right;
@@ -638,18 +638,17 @@ pub fn image_tile(
         let (sv, su) = fmt_size(m.bytes);
         let (w, h) = (m.w.to_string(), m.h.to_string());
         if is_sel || resp.hovered() {
-            // side panel (variant A): label small and dim, value bright, unit in accent
+            // side panel (variant A): label small and faint, number in accent, unit dim
             let pw = (r.width() * 0.5).clamp(70.0, 96.0);
             let panel = egui::Rect::from_min_max(egui::pos2(r.right() - pw, r.top()), r.max);
             p.rect_filled(panel, 0.0, SHADE);
-            let rows: [(&str, Vec<(&str, egui::Color32)>); 3] = [
-                ("storlek", vec![(&sv, txt), (" ", txt), (su, acc)]),
-                ("mått", vec![(&w, txt), ("×", acc), (&h, txt), (" px", acc)]),
-                ("format", vec![(&m.ext, txt)]),
+            let rows: [(&str, Vec<(&str, egui::Color32)>); 2] = [
+                ("storlek", vec![(&sv, acc), (" ", dim), (su, dim)]),
+                ("mått", vec![(&w, acc), ("×", txt), (&h, acc), (" px", dim)]),
             ];
             let mut y = panel.top() + 7.0;
             for (lbl, val) in rows {
-                let lg = runs(ui, &[(lbl, dim)], 9.5);
+                let lg = runs(ui, &[(lbl, theme::FAINT)], 9.5);
                 p.galley(egui::pos2(panel.right() - 7.0 - lg.size().x, y), lg.clone(), dim);
                 y += lg.size().y;
                 let vg = runs(ui, &val, 10.5);
@@ -658,7 +657,8 @@ pub fn image_tile(
             }
         } else {
             // corner badge (variant B): W×H · size
-            let g = runs(ui, &[(&w, txt), ("×", dim), (&h, txt), (" · ", dim), (&sv, txt), (" ", txt), (su, acc)], 10.0);
+            let f = theme::FAINT;
+            let g = runs(ui, &[(&w, acc), ("×", txt), (&h, acc), (" │ ", f), (&sv, acc), (" ", dim), (su, dim)], 10.0);
             let badge = egui::Rect::from_min_size(r.right_bottom() - g.size() - egui::vec2(15.0, 9.0), g.size() + egui::vec2(10.0, 4.0));
             p.rect_filled(badge, 3.0, SHADE);
             p.galley(badge.min + egui::vec2(5.0, 2.0), g, txt);

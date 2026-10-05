@@ -5,6 +5,7 @@ edition = "2024"
 description = "Omniaware – keyboard-first capture, journal and timeline for Windows"
 license = "MIT"
 repository = "https://github.com/SGJohansson/Omniaware"
+homepage = "https://voidflow.tech/"
 
 [dependencies]
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wgpu"] }
