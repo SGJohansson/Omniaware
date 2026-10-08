@@ -6,7 +6,16 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 
 > **Status:** early development (v0.4). Windows 10/11 only. The interface is in British English.
 
+![Omniaware main window: timeline, calendar and named entries](assets/screenshots/main-window.png)
+
 ## Features
+
+<p align="center">
+  <img src="assets/screenshots/capture-popup.png" alt="Capture popup pre-filled with the clipboard" width="520">
+  &nbsp;
+  <img src="assets/screenshots/silent-capture.png" alt="Notice shown after a silent capture" width="300">
+</p>
+<p align="center"><sub>The capture popup (<code>Ctrl+Alt+O</code>) and the notice after a silent capture (<code>Ctrl+C</code> <code>C</code>).</sub></p>
 
 - **Silent capture** — press `Ctrl+C` twice in quick succession and the clipboard (text or image) is saved straight to today's journal. The tray icon briefly turns green; nothing else interrupts you.
 - **One key for everything else** — `Ctrl+Alt+O` opens a small capture window pre-filled with the clipboard. Press it again and the same note expands into the main window: a day-by-day timeline, a month calendar marking days with content, named entries and a recycle bin. Press it a third time to put everything away.
