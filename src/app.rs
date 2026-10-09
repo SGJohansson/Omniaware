@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::db::Db;
 use crate::doc::{self, Doc};
 use crate::main_view::MainState;
-use crate::{log, text as t, theme, tray, win};
+use crate::{export, log, text as t, theme, tray, win};
 use egui::ViewportCommand;
 use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
@@ -436,7 +436,13 @@ impl App {
             SaveAs(r) => {
                 let src = path(&r);
                 let name = format!("omniaware-{}.png", chrono::Local::now().format("%Y%m%d-%H%M%S"));
-                if let Some(dst) = rfd::FileDialog::new().set_file_name(name).add_filter("PNG", &["png"]).save_file()
+                #[cfg_attr(not(windows), allow(unused_mut))]
+                let mut dlg = rfd::FileDialog::new().set_file_name(name).add_filter("PNG", &["png"]);
+                #[cfg(windows)]
+                {
+                    dlg = dlg.set_parent(&export::owner::Owner(self.hwnd));
+                }
+                if let Some(dst) = dlg.save_file()
                     && let Err(e) = std::fs::copy(&src, &dst)
                 {
                     log::error(format!("save as {}: {e}", dst.display()));
@@ -462,6 +468,67 @@ impl App {
                 }
                 self.main.stale = true;
             }
+        }
+    }
+
+    /// Ctrl+Shift+S / "save as": the entry on screen (capture popup or main editor) to a file.
+    /// The entry stays in the journal; the file is a copy. The path is remembered for next time.
+    pub(crate) fn save_doc_as(&mut self) {
+        let owner = self.hwnd;
+        let db = &self.db;
+        let d = match self.mode {
+            Mode::Capture => self.capture.as_mut(),
+            Mode::Main => self.main.editor.as_mut(),
+            Mode::Hidden => None,
+        };
+        let Some(d) = d else { return };
+        d.flush(db);
+        let suggested = d
+            .export_path
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(export::suggest_name(&d.name, &d.body, d.created)));
+        let Some(path) = export::ask_path(owner, &suggested) else { return };
+        match export::write(&path, &d.body) {
+            Ok(_) => d.exported(db, &path),
+            Err(e) => export_failed(&path, &e),
+        }
+    }
+
+    /// Selected list entries to one plain-text file (one entry: its text as is).
+    pub(crate) fn export_entries(&mut self, ids: &[i64]) {
+        let entries: Vec<crate::db::Entry> =
+            ids.iter().filter_map(|&id| self.db.get(id).map_err(|e| log::error(format!("export #{id}: {e}"))).ok()).collect();
+        let n = entries.len();
+        let single = match entries.as_slice() {
+            [e] => Some((e.id, e.export_path.clone(), export::suggest_name(e.name.as_deref().unwrap_or(""), &e.body, e.created))),
+            _ => None,
+        };
+        let suggested = match &single {
+            Some((_, Some(p), _)) => PathBuf::from(p),
+            Some((_, None, name)) => PathBuf::from(name),
+            None if n > 0 => PathBuf::from(export::dump_name(n)),
+            None => return,
+        };
+        let text = export::dump(entries);
+        let Some(path) = export::ask_path(self.hwnd, &suggested) else { return };
+        match export::write(&path, &text) {
+            Ok(bytes) => {
+                if let Some((id, ..)) = single
+                    && let Err(e) = self.db.set_export_path(id, &path.to_string_lossy())
+                {
+                    log::error(format!("remember export path: {e}"));
+                }
+                let (v, u) = doc::fmt_size(bytes);
+                let file = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+                crate::notice::show(crate::notice::Notice::ok(
+                    t::NOTICE_EXPORTED,
+                    file,
+                    t::exported_detail(n, &format!("{v} {u}")),
+                    None,
+                ));
+            }
+            Err(e) => export_failed(&path, &e),
         }
     }
 
@@ -770,6 +837,12 @@ impl eframe::App for App {
             theme::open_url(&u);
         }
     }
+}
+
+fn export_failed(path: &std::path::Path, e: &std::io::Error) {
+    let msg = format!("save as {}: {e}", path.display());
+    log::error(msg.clone());
+    crate::notice::show(crate::notice::Notice::error(msg));
 }
 
 /// The Windows "Open with" dialog (choose a program); xdg-open elsewhere.

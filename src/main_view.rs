@@ -251,6 +251,8 @@ enum Bulk {
     All,
     Clear,
     Copy,
+    /// One plain-text file (save dialog).
+    Export,
     /// To the bin.
     Delete,
     Restore,
@@ -372,7 +374,11 @@ impl App {
                 self.apply_bulk(&ctx, Bulk::All);
             }
             if !self.main.picked.is_empty() {
-                if ctx.input(|i| i.key_pressed(Key::Delete)) {
+                if self.main.view != View::Trash
+                    && ctx.input_mut(|i| i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::S))
+                {
+                    self.apply_bulk(&ctx, Bulk::Export);
+                } else if ctx.input(|i| i.key_pressed(Key::Delete)) {
                     let b = if self.main.view == View::Trash { Bulk::Purge } else { Bulk::Delete };
                     self.apply_bulk(&ctx, b);
                 } else if ctx.input(|i| i.key_pressed(Key::Escape)) {
@@ -398,18 +404,25 @@ impl App {
         if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::N)) {
             self.new_entry();
         }
+        let mut save_as = false;
         if let Some(ed) = self.main.editor.as_mut() {
             if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::E)) {
                 ed.preview = !ed.preview;
                 ed.focus = !ed.preview;
             }
-            if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::S)) {
+            if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::S)) {
+                // Before Ctrl+S: egui's Ctrl+S also matches Ctrl+Shift+S.
+                save_as = true;
+            } else if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::S)) {
                 ed.save_now(&self.db);
                 self.main.stale = true;
             }
             if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F2)) {
                 ctx.memory_mut(|m| m.request_focus(Id::new("ed_name")));
             }
+        }
+        if save_as {
+            self.save_doc_as();
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F1)) {
             self.toggle_shortcuts();
@@ -753,6 +766,9 @@ impl App {
                         if theme::quiet_button(ui, t::BTN_COPY).clicked() {
                             act = Some(Bulk::Copy);
                         }
+                        if theme::quiet_button(ui, t::BTN_EXPORT).on_hover_text(t::TIP_EXPORT).clicked() {
+                            act = Some(Bulk::Export);
+                        }
                         if ui.button(RichText::new(t::BTN_DELETE).color(theme::ERR)).on_hover_text(t::TIP_TO_BIN).clicked() {
                             act = Some(Bulk::Delete);
                         }
@@ -764,6 +780,9 @@ impl App {
                         // Right-to-left: added rightmost first, so the keys of a combo go in reverse.
                         theme::key_hint(ui, &["esc"]);
                         theme::key_hint(ui, &["del"]);
+                        if !trash {
+                            theme::key_hint(ui, &["s", "shift", "ctrl"]);
+                        }
                         theme::key_hint(ui, &["a", "ctrl"]);
                     });
                 });
@@ -784,6 +803,11 @@ impl App {
             Bulk::Copy => {
                 let bodies: Vec<String> = ids.iter().filter_map(|&id| self.db.get(id).ok()).map(|e| e.body).collect();
                 ctx.copy_text(bodies.join("\n\n"));
+                self.main.picked = ids;
+                return;
+            }
+            Bulk::Export => {
+                self.export_entries(&ids);
                 self.main.picked = ids;
                 return;
             }
@@ -1056,6 +1080,7 @@ impl App {
         let dir = self.dir.clone();
         let mut back = false;
         let mut discard = false;
+        let mut save_as = false;
         let mut commit = false;
         let mut img_act = None;
         let Some(ed) = self.main.editor.as_mut() else { return };
@@ -1065,6 +1090,9 @@ impl App {
             back = ui.button(t::BTN_BACK).clicked();
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 discard = ui.button(RichText::new(t::BTN_DISCARD).color(theme::ERR)).clicked();
+                if ui.button(t::BTN_SAVE_AS).on_hover_text(t::TIP_SAVE_AS).clicked() {
+                    save_as = true;
+                }
                 let lbl = if ed.preview { t::BTN_EDIT } else { t::BTN_PREVIEW };
                 if ui.button(lbl).on_hover_text("Ctrl+E").clicked() {
                     ed.preview = !ed.preview;
@@ -1137,6 +1165,9 @@ impl App {
                 ed.focus = true;
             }
             self.main.stale = true;
+        }
+        if save_as {
+            self.save_doc_as();
         }
         if discard {
             if let Some(mut d) = self.main.editor.take() {

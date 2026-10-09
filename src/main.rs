@@ -6,6 +6,7 @@ mod capture;
 mod config;
 mod db;
 mod doc;
+mod export;
 mod log;
 mod main_view;
 mod text;

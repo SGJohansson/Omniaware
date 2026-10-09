@@ -78,6 +78,8 @@ pub struct Entry {
     pub created: i64,
     pub starts: Option<i64>,
     pub images: Vec<Img>,
+    /// Where "save as" last wrote this entry (pre-fills the next dialog).
+    pub export_path: Option<String>,
 }
 
 /// One image attached to an entry. The same blob may appear several times (deliberate copies).
@@ -291,6 +293,12 @@ impl Db {
             )?;
             tx.commit()?;
         }
+        if v < 4 {
+            // v4: remember the file an entry was last exported to.
+            let tx = self.conn.unchecked_transaction()?;
+            tx.execute_batch("ALTER TABLE entry ADD COLUMN export_path TEXT; PRAGMA user_version=4;")?;
+            tx.commit()?;
+        }
         Ok(())
     }
 
@@ -370,7 +378,7 @@ impl Db {
 
     pub fn get(&self, id: i64) -> Result<Entry> {
         let mut e = self.conn.query_row(
-            "SELECT id, name, body, created, starts FROM entry WHERE id=?1",
+            "SELECT id, name, body, created, starts, export_path FROM entry WHERE id=?1",
             [id],
             |r| {
                 Ok(Entry {
@@ -380,6 +388,7 @@ impl Db {
                     created: r.get(3)?,
                     starts: r.get(4)?,
                     images: Vec::new(),
+                    export_path: r.get(5)?,
                 })
             },
         )?;
@@ -427,6 +436,12 @@ impl Db {
             Some((id, body)) => Ok(Some((body, self.attachments(id)?.into_iter().map(|i| i.blob).collect()))),
             None => Ok(None),
         }
+    }
+
+    /// Remembers the file an entry was exported to (not an edit: `updated` stays).
+    pub fn set_export_path(&self, id: i64, path: &str) -> Result<()> {
+        self.conn.execute("UPDATE entry SET export_path=?1 WHERE id=?2", params![path, id])?;
+        Ok(())
     }
 
     pub fn clear_name(&self, id: i64) -> Result<()> {
@@ -589,6 +604,10 @@ mod tests {
         assert_eq!(db.trash().unwrap().len(), 1);
         db.restore(b).unwrap();
         assert_eq!(db.trash().unwrap().len(), 0);
+
+        assert_eq!(db.get(b).unwrap().export_path, None);
+        db.set_export_path(b, r"C:\x\adress.txt").unwrap();
+        assert_eq!(db.get(b).unwrap().export_path.as_deref(), Some(r"C:\x\adress.txt"));
 
         db.delete_hard(a).unwrap();
         assert!(db.search(&crate::search::parse("världen")).unwrap().is_empty());

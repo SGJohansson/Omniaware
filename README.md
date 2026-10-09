@@ -4,7 +4,7 @@ A lightweight, keyboard-first home for everything I don't want to lose: clipboar
 
 I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markdown editor and browser-based note tools. The goals are simple: it should be there the instant I need it, stay out of the way when I don't, and never lose a single character — not even on a power cut.
 
-> **Status:** early development (v0.4). Windows 10/11 only. The interface is in British English.
+> **Status:** early development (v0.5). Windows 10/11 only. The interface is in British English.
 
 ![Omniaware main window: timeline, calendar and named entries](assets/screenshots/main-window.png)
 
@@ -24,6 +24,8 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 - **A word when it's saved** — closing a note or capturing silently shows a small notice above the system tray (what was saved, where, and how much). Click it to open the entry; hover to keep it.
 - **Markdown and links** — entries are plain Markdown. The editor highlights headings, **bold**, *italics*, `code`, lists, task boxes and quotes as you type, and every web, FTP, file or `mailto:` address becomes a link (`Ctrl`+click to open). `Ctrl+E` shows the rendered preview.
 - **Images** — pasted images are kept as attachments shown above the text; an image-only entry is displayed full size with the text as its caption. Every image is numbered and shows its dimensions and file size; hover for the full details. Pasting a picture that is already attached asks before adding it as a copy (the file is shared, not duplicated). Click to select (`Ctrl`+click for several, `Delete` removes), double-click to enlarge, right-click to copy, save, open with another program or show the file in Explorer.
+- **Save as a file** — `Ctrl+Shift+S` (or *save as…*) writes the entry's text to any file: a script here, a note there. Usually faster than opening an editor. The entry stays in the journal, and the next save as starts from the same file. Files are written as UTF-8 with Windows line endings; shell scripts (`.sh`, `.bash`, `.zsh`, `.fish`) get Unix line endings and PowerShell files (`.ps1`, `.psm1`, `.psd1`) a byte-order mark so Windows PowerShell 5.1 reads `åäö` correctly.
+- **Export several at once** — select entries in any list and press `Ctrl+Shift+S` (or *export…*). One entry is written exactly as it is; several become one plain-text file, oldest first, each under a one-line header with its date, name and image count. Images are attachments, so the text is clean.
 - **Named snippets** — give an entry a name (`F2`) and it becomes a reusable snippet, much like an AutoHotkey text store. `Enter` or `Tab` takes you straight back to the text.
 - **At a glance** — the timeline shows each entry's word count, number of images, size on disk and links next to the time.
 - **Crash-safe by design** — see [Data and durability](#data-and-durability).
@@ -46,6 +48,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 | `Ctrl+Alt+O` | Keep the note and expand to the main window |
 | `Shift+Esc` | Move to the recycle bin |
 | `Ctrl+S` | Save a version now |
+| `Ctrl+Shift+S` | Save the text as a file |
 | `F2` | Name the entry. `Enter` / `Tab` back to the text, `Ctrl+Enter` name and close. If the name is taken, `Enter` again moves it here; the previous entry is kept, unnamed |
 | `F1` (hold or click) | Show all shortcuts; the most common ones are always listed along the bottom |
 | `Ctrl+V` | Paste text or an image |
@@ -61,6 +64,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 | `Ctrl+E` | Toggle edit / preview |
 | `Ctrl`+click | Open a link |
 | `Ctrl+S` / `F2` | Save a version / name the entry |
+| `Ctrl+Shift+S` | Save the open entry as a file, or export the selected entries as one file |
 | `Ctrl`+click / `Shift`+click | Select entries / a range |
 | `Ctrl+A` · `Delete` | Select the whole list · move the selection to the bin |
 | `F1` | Show or hide the shortcut panel |
@@ -87,6 +91,14 @@ cd Omniaware
 cargo build --release
 .\target\release\omniaware.exe
 ```
+
+To build and install in one step (to `%LOCALAPPDATA%\Programs\Omniaware`, with a Start menu shortcut):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1            # add -Startup to start with Windows
+```
+
+Run it again after pulling a new version; it closes the running copy, replaces it and starts the new one. Your data is not touched.
 
 ## Data and durability
 
@@ -126,6 +138,7 @@ main_height = 700.0
 
 ## Roadmap
 
+- Screenshots (`Ctrl+Alt+S`): rectangle, window or full screen, straight into an entry, the clipboard and a folder of your choice
 - Events with natural-language dates in Swedish (`imorgon 14 tandläkare`), a full calendar view and reminders
 - Desktop post-it notes
 - An aggregated to-do view built from Markdown task lists

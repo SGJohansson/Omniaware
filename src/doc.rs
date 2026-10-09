@@ -40,6 +40,8 @@ pub struct Doc {
     pub name: String,
     pub saved_name: Option<String>,
     pub created: i64,
+    /// Where "save as" last wrote this entry.
+    pub export_path: Option<String>,
     #[allow(dead_code)] // used by Ctrl+D events (step 3)
     pub starts: Option<i64>,
     /// Created in this session (an emptied fresh doc is dropped, not trashed).
@@ -78,6 +80,7 @@ impl Doc {
             name: String::new(),
             saved_name: None,
             created: db::now_ms(),
+            export_path: None,
             starts: None,
             fresh: true,
             dirty: false,
@@ -103,6 +106,7 @@ impl Doc {
             name: e.name.clone().unwrap_or_default(),
             saved_name: e.name,
             created: e.created,
+            export_path: e.export_path,
             starts: e.starts,
             fresh: false,
             status: Status::Clean,
@@ -337,6 +341,19 @@ impl Doc {
             }
             Err(e) => self.fail(format!("version: {e}")),
         }
+    }
+
+    /// After "save as": remember the file and say so.
+    pub fn exported(&mut self, db: &Db, path: &Path) {
+        let s = path.to_string_lossy().into_owned();
+        if let Some(id) = self.id
+            && let Err(e) = db.set_export_path(id, &s)
+        {
+            log::error(format!("remember export path: {e}"));
+        }
+        self.export_path = Some(s);
+        let file = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        self.show_toast(t::toast_exported(&file));
     }
 
     fn show_toast(&mut self, text: String) {

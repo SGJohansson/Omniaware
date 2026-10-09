@@ -28,6 +28,7 @@ enum Foot {
     Save,
     Name,
     Version,
+    SaveAs,
     Expand,
     Help,
 }
@@ -47,6 +48,7 @@ impl App {
         // ---- keys (the lightbox owns Esc while it is open) ----
         let modal = self.lightbox.is_some() || self.dup_prompt.is_some();
         let mut action = Action::None;
+        let mut save_as = false;
         let esc_used = self.selection_keys(&ctx);
         let (esc, shift) = ctx.input(|i| (i.key_pressed(Key::Escape), i.modifiers.shift));
         if modal || esc_used {
@@ -63,10 +65,16 @@ impl App {
         } else if !self.capture_naming && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F2)) {
             self.capture_naming = true;
             self.capture_name_focus = true;
+        } else if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::S)) {
+            // Before Ctrl+S: egui's Ctrl+S also matches Ctrl+Shift+S.
+            save_as = true;
         } else if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::S)) {
             if let Some(d) = self.capture.as_mut() {
                 d.save_now(&self.db);
             }
+        }
+        if save_as {
+            self.save_doc_as();
         }
         match action {
             Action::Save => return self.finish_capture(&ctx, false),
@@ -114,10 +122,11 @@ impl App {
             }
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 14.0;
-                let keys: [(&[&str], &str, Foot); 4] = [
+                let keys: [(&[&str], &str, Foot); 5] = [
                     (&["esc"], t::FOOT_SAVE, Foot::Save),
                     (&["F2"], t::FOOT_NAME, Foot::Name),
                     (&["ctrl", "s"], t::FOOT_VERSION, Foot::Version),
+                    (&["ctrl", "shift", "s"], t::FOOT_SAVE_AS, Foot::SaveAs),
                     (&["ctrl", "alt", "o"], t::FOOT_EXPAND, Foot::Expand),
                 ];
                 for (k, label, f) in keys {
@@ -202,6 +211,7 @@ impl App {
                 self.capture_naming = true;
                 self.capture_name_focus = true;
             }
+            Some(Foot::SaveAs) => self.save_doc_as(),
             Some(Foot::Version) => {
                 if let Some(d) = self.capture.as_mut() {
                     d.save_now(&self.db);

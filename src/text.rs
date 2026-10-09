@@ -41,6 +41,7 @@ pub const BTN_EDIT: &str = "edit";
 pub const BTN_TODAY: &str = "today";
 pub const BTN_COPY: &str = "copy";
 pub const BTN_SAVE_AS: &str = "save as…";
+pub const BTN_EXPORT: &str = "export…";
 pub const BTN_OPEN_WITH: &str = "open with…";
 pub const BTN_REVEAL: &str = "show in folder";
 pub const BTN_REMOVE: &str = "remove";
@@ -106,6 +107,7 @@ pub fn link_tip(url: &str) -> String {
 pub const FOOT_SAVE: &str = "save";
 pub const FOOT_NAME: &str = "name";
 pub const FOOT_VERSION: &str = "version";
+pub const FOOT_SAVE_AS: &str = "save as";
 pub const FOOT_EXPAND: &str = "expand";
 pub const FOOT_ALL: &str = "all shortcuts";
 
@@ -142,6 +144,21 @@ pub const LEGEND_SAVED: &str = "saved to disk";
 pub const LEGEND_WAITING: &str = "waiting to save";
 pub const LEGEND_ERROR: &str = "error – see the log";
 pub const LEGEND_RING: &str = "A ring = something was just saved.";
+
+// ---------- export ----------
+
+pub const DLG_SAVE_AS: &str = "Save as plain text";
+pub const NOTICE_EXPORTED: &str = "Exported";
+pub const TIP_EXPORT: &str = "One plain-text file, oldest first (Ctrl+Shift+S)";
+pub const TIP_SAVE_AS: &str = "Save the text to a file (Ctrl+Shift+S)";
+
+pub fn toast_exported(file: &str) -> String {
+    format!("✓ Saved as {file}")
+}
+
+pub fn exported_detail(entries: usize, size: &str) -> String {
+    format!("{entries} {} · {size}", plural(entries, "entry", "entries"))
+}
 
 // ---------- notices (above the tray) ----------
 
@@ -221,6 +238,7 @@ pub const CAPTURE_KEYS: &[Group] = &[
         &[
             (&["Esc"], "save and close"),
             (&["Ctrl", "S"], "save a version"),
+            (&["Ctrl", "Shift", "S"], "save as file"),
             (&["F2"], "name"),
             (&["Ctrl", "V"], "paste image"),
             (&["Ctrl", "Click"], "open link"),
@@ -238,6 +256,7 @@ pub const MAIN_KEYS: &[Group] = &[
         ENTRY,
         &[
             (&["Ctrl", "S"], "save a version"),
+            (&["Ctrl", "Shift", "S"], "save as file"),
             (&["F2"], "name"),
             (&["Ctrl", "E"], "preview"),
             (&["Ctrl", "V"], "paste image"),
@@ -252,6 +271,7 @@ pub const MAIN_KEYS: &[Group] = &[
             (&["Shift", "Click"], "select a range"),
             (&["Ctrl", "Shift", "Click"], "add a range"),
             (&["Ctrl", "A"], "select all in the list"),
+            (&["Ctrl", "Shift", "S"], "export as one file"),
             (&["Delete"], "move to bin"),
             (&["Esc"], "clear selection"),
         ],
