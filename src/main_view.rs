@@ -387,7 +387,10 @@ impl App {
                 }
             }
         }
-        if self.lightbox.is_some() || self.dup_prompt.is_some() || esc_used {
+        if self.main.editor.is_some() {
+            self.send_keys(&ctx);
+        }
+        if self.lightbox.is_some() || self.dup_prompt.is_some() || self.send_dlg.is_some() || esc_used {
             // the lightbox / image selection owns Esc
         } else if ctx.input(|i| i.key_pressed(Key::Escape)) {
             if self.main.editor.is_some() {
@@ -1099,6 +1102,8 @@ impl App {
         let mut save_as = false;
         let mut commit = false;
         let mut img_act = None;
+        let mut send = false;
+        let send_label = self.send_label();
         let Some(ed) = self.main.editor.as_mut() else { return };
         // Row 1: navigation + name on the left, actions on the right. Row 2: timestamp.
         // Buttons are placed first (right-to-left) so a narrow window shrinks the name field, not them.
@@ -1108,6 +1113,9 @@ impl App {
                 discard = ui.button(RichText::new(t::BTN_DISCARD).color(theme::p().err)).clicked();
                 if ui.button(t::BTN_SAVE_AS).on_hover_text(t::TIP_SAVE_AS).clicked() {
                     save_as = true;
+                }
+                if ui.button(&send_label).on_hover_text(t::TIP_SEND).clicked() {
+                    send = true;
                 }
                 let lbl = if ed.preview { t::BTN_EDIT } else { t::BTN_PREVIEW };
                 if ui.button(lbl).on_hover_text("Ctrl+E").clicked() {
@@ -1181,6 +1189,10 @@ impl App {
                 ed.focus = true;
             }
             self.main.stale = true;
+        }
+        if send {
+            let ctx = ui.ctx().clone();
+            self.open_send(&ctx, true);
         }
         if save_as {
             self.save_doc_as();

@@ -15,6 +15,19 @@ pub struct Config {
     pub scanlines: bool,
     pub hotkeys: Hotkeys,
     pub window: WindowCfg,
+    pub send: SendCfg,
+}
+
+/// Ctrl+Enter / Ctrl+Shift+Enter: text to a shell (on the prompt line, never run) or Explorer.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct SendCfg {
+    /// Folder shells start in; "" = your home folder.
+    pub cwd: String,
+    /// PowerShell to use; "" = pwsh.exe if installed, else Windows PowerShell.
+    pub pwsh: String,
+    /// Targets that no longer ask first: "pwsh", "cmd", "wsl", "explorer", "window".
+    pub skip_confirm: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -48,6 +61,7 @@ impl Default for Config {
             scanlines: false,
             hotkeys: Hotkeys::default(),
             window: WindowCfg::default(),
+            send: SendCfg::default(),
         }
     }
 }

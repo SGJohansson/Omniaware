@@ -4,7 +4,7 @@ A lightweight, keyboard-first home for everything I don't want to lose: clipboar
 
 I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markdown editor and browser-based note tools. The goals are simple: it should be there the instant I need it, stay out of the way when I don't, and never lose a single character — not even on a power cut.
 
-> **Status:** early development (v0.6). Windows 10/11 only. The interface is in British English.
+> **Status:** early development (v0.7). Windows 10/11 only. The interface is in British English.
 
 ![Omniaware main window: timeline, calendar and named entries](assets/screenshots/main-window.png)
 
@@ -25,6 +25,14 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 - **Markdown and links** — entries are plain Markdown. The editor highlights headings, **bold**, *italics*, `code`, lists, task boxes and quotes as you type, and every web, FTP, file or `mailto:` address becomes a link (`Ctrl`+click to open). `Ctrl+E` shows the rendered preview.
 - **Images** — pasted images are kept as attachments shown above the text; an image-only entry is displayed full size with the text as its caption. Every image is numbered and shows its dimensions and file size; hover for the full details. Pasting a picture that is already attached asks before adding it as a copy (the file is shared, not duplicated). Click to select (`Ctrl`+click for several, `Delete` removes), double-click to enlarge, right-click to copy, save, open with another program or show the file in Explorer.
 - **Save as a file** — `Ctrl+Shift+S` (or *save as…*) writes the entry's text to any file: a script here, a note there. Usually faster than opening an editor. The entry stays in the journal, and the next save as starts from the same file. Files are written as UTF-8 with Windows line endings; shell scripts (`.sh`, `.bash`, `.zsh`, `.fish`) get Unix line endings and PowerShell files (`.ps1`, `.psm1`, `.psd1`) a byte-order mark so Windows PowerShell 5.1 reads `åäö` correctly.
+- **Send to a shell, never run** — `Ctrl+Enter` hands the note to the shell it looks like (the suggestion shows in the footer: `→ PowerShell`, `→ WSL`, `→ cmd`, `→ Explorer`); `Ctrl+Shift+Enter` lets you choose. Each opens in its own console window with the text **on the prompt line, unrun** — read it, edit it, press Enter yourself:
+  - *PowerShell* (pwsh, else Windows PowerShell): inserted through PSReadLine; several lines stay one editable block.
+  - *WSL* (your default distribution): one line on an editable prompt line; several lines are printed and the prompt line sources them.
+  - *cmd*: typed at the prompt; several lines become `call "<file>"`.
+  - *Explorer*: opens a path (`C:\…`, `\\server\share`, `/mnt/c/…`, Linux paths through WSL) with the file selected, or a web address in the browser.
+  - *Previous window*: pastes with `Ctrl+V` (several lines are flagged: a terminal may run each one).
+
+  It asks first, with *as administrator* (one UAC prompt) and *don't ask again* per target. Shells start in your home folder unless `[send] cwd` says otherwise.
 - **Export several at once** — select entries in any list and press `Ctrl+Shift+S` (or *export…*). One entry is written exactly as it is; several become one plain-text file, oldest first, each under a one-line header with its date, name and image count. Images are attachments, so the text is clean.
 - **Named snippets** — give an entry a name (`F2`) and it becomes a reusable snippet, much like an AutoHotkey text store. `Enter` or `Tab` takes you straight back to the text.
 - **At a glance** — the timeline shows each entry's word count, number of images, size on disk and links next to the time.
@@ -48,6 +56,8 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 |---|---|
 | `Esc` | Save and close (empty entries are discarded) |
 | `Ctrl+Alt+O` | Keep the note and expand to the main window |
+| `Ctrl+Enter` | Send to the suggested shell or Explorer (asks first) |
+| `Ctrl+Shift+Enter` | Send to… (choose; `1`–`5`, `A` as administrator) |
 | `Shift+Esc` | Move to the recycle bin |
 | `Ctrl+S` | Save a version now |
 | `Ctrl+Shift+S` | Save the text as a file |
@@ -64,6 +74,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 | `Ctrl+K` | Search. `Enter` opens, `Shift+Enter` pastes into the previous window |
 | `Ctrl+N` | New entry |
 | `Ctrl+E` | Toggle edit / preview |
+| `Ctrl+Enter` / `Ctrl+Shift+Enter` | Send the open entry to a shell or Explorer / choose where |
 | `Ctrl`+click | Open a link |
 | `Ctrl+S` / `F2` | Save a version / name the entry |
 | `Ctrl+Shift+S` | Save the open entry as a file, or export the selected entries as one file |
@@ -110,6 +121,7 @@ Everything lives locally in `%APPDATA%\Omniaware\` (override with the `OMNIAWARE
 |---|---|
 | `omniaware.db` | All entries, revision history and the search index (SQLite) |
 | `blobs\` | Images, stored content-addressed by their BLAKE3 hash |
+| `send\` | Text handed to shells (cleared after a day) |
 | `config.toml` | Settings; created with defaults on first start |
 | `omniaware.log` | Errors, plus notes on slow window opens and ignored shortcut presses |
 
@@ -138,6 +150,11 @@ height = 420.0
 font_size = 14.0
 main_width = 1040.0
 main_height = 700.0
+
+[send]
+cwd = ""                     # folder shells start in; "" = your home folder
+pwsh = ""                    # "" = pwsh.exe if installed, else Windows PowerShell
+skip_confirm = []            # targets that no longer ask: "pwsh", "cmd", "wsl", "explorer", "window"
 ```
 
 ## Roadmap

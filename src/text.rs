@@ -104,6 +104,41 @@ pub fn link_tip(url: &str) -> String {
 
 // ---------- capture footer ----------
 
+// ---------- send to ----------
+
+pub const SEND_TO: &str = "send to…";
+pub const TIP_SEND: &str = "Put the text on a shell's prompt line (not run), or open the path (Ctrl+Enter; Ctrl+Shift+Enter to choose)";
+pub const SEND_TITLE: &str = "Send to";
+pub const SEND_PWSH: &str = "on the prompt line, not run";
+pub const SEND_WSL: &str = "on the prompt line, not run";
+pub const SEND_WSL_MANY: &str = "lines shown, Enter runs them";
+pub const SEND_CMD: &str = "typed at the prompt, not run";
+pub const SEND_CMD_MANY: &str = "lines shown, `call` waits for Enter";
+pub const SEND_BROWSER: &str = "opens in the browser";
+pub const SEND_NO_PATH: &str = "no path or web address in the text";
+pub const SEND_NO_WINDOW: &str = "no previous window";
+pub const SEND_WINDOW: &str = "pastes with Ctrl+V";
+pub const SEND_WINDOW_MANY: &str = "pastes with Ctrl+V · a terminal may run each line";
+pub const SEND_ADMIN: &str = "as administrator";
+pub const BTN_SEND: &str = "send";
+
+pub fn send_confirm(target: &str) -> String {
+    format!("Send to {target}?")
+}
+
+pub fn send_remember(target: &str) -> String {
+    format!("don't ask again for {target}")
+}
+
+pub fn send_opens(path: &str) -> String {
+    let short: String = path.chars().take(40).collect();
+    if path.chars().count() > 40 { format!("opens {short}…") } else { format!("opens {short}") }
+}
+
+pub fn send_more(n: usize) -> String {
+    format!("… {n} more line{}", if n == 1 { "" } else { "s" })
+}
+
 pub const TIP_THEME: &str = "Theme: dark → light → system → voidflow (Ctrl+Shift+T)";
 
 pub const FOOT_SAVE: &str = "save";
@@ -249,6 +284,8 @@ pub const CAPTURE_KEYS: &[Group] = &[
             (&["Ctrl", "V"], "paste image"),
             (&["Ctrl", "Click"], "open link"),
             (&["Ctrl", "Alt", "O"], "expand"),
+            (&["Ctrl", "Enter"], "send to suggested shell"),
+            (&["Ctrl", "Shift", "Enter"], "send to…"),
             (&["Shift", "Esc"], "discard"),
         ],
     ),
@@ -265,6 +302,8 @@ pub const MAIN_KEYS: &[Group] = &[
             (&["Ctrl", "Shift", "S"], "save as file"),
             (&["F2"], "name"),
             (&["Ctrl", "E"], "preview"),
+            (&["Ctrl", "Enter"], "send to suggested shell"),
+            (&["Ctrl", "Shift", "Enter"], "send to…"),
             (&["Ctrl", "V"], "paste image"),
             (&["Ctrl", "Click"], "open link"),
             (&["Esc"], "back"),

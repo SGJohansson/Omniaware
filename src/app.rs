@@ -67,7 +67,7 @@ pub struct App {
     pub(crate) dir: PathBuf,
     pub(crate) cfg: Config,
     sig: Arc<Signals>,
-    hwnd: isize,
+    pub(crate) hwnd: isize,
     _hotkeys: Option<GlobalHotKeyManager>,
     tray: Option<tray::Tray>,
 
@@ -76,7 +76,7 @@ pub struct App {
     /// Capture was opened on top of the main window; go back there when done.
     return_to_main: bool,
     /// Window that had focus before Omni appeared (paste-back target).
-    prev_fg: isize,
+    pub(crate) prev_fg: isize,
     main_rect: Option<win::Rect>,
     v_was_down: bool,
     /// Keep asking for the foreground until this moment (Windows may refuse the first try).
@@ -101,6 +101,9 @@ pub struct App {
     /// Shortcut overlay in the capture popup ("?" button / hold F1).
     pub(crate) capture_help: bool,
     pub(crate) theme: theme::ThemeChoice,
+    /// The "send to" dialog, when open.
+    pub(crate) send_dlg: Option<crate::send_ui::SendDlg>,
+    pub(crate) send_hint: Option<crate::send_ui::Hint>,
 }
 
 impl App {
@@ -232,6 +235,8 @@ impl App {
             dup_prompt: None,
             capture_help: false,
             theme: theme_choice,
+            send_dlg: None,
+            send_hint: None,
         }
     }
 
@@ -458,6 +463,7 @@ impl App {
             }
         }
         self.mode = Mode::Hidden;
+        self.send_dlg = None;
         self.reveal = None;
         self.shown_at = None;
         ctx.send_viewport_cmd(ViewportCommand::Visible(false));
@@ -650,7 +656,7 @@ impl App {
     /// Delete removes selected images, Esc clears the selection (when the text field isn't focused).
     /// Returns true if it consumed Esc.
     pub(crate) fn selection_keys(&mut self, ctx: &egui::Context) -> bool {
-        if self.lightbox.is_some() || self.dup_prompt.is_some() {
+        if self.lightbox.is_some() || self.dup_prompt.is_some() || self.send_dlg.is_some() {
             return false;
         }
         let Some(d) = self.active_doc() else { return false };
@@ -765,7 +771,7 @@ impl App {
             Mode::Hidden => None,
         };
         // Works wherever focus is inside the window; modals own the keyboard while open.
-        if self.lightbox.is_some() || self.dup_prompt.is_some() || !ctx.input(|i| i.focused) {
+        if self.lightbox.is_some() || self.dup_prompt.is_some() || self.send_dlg.is_some() || !ctx.input(|i| i.focused) {
             return;
         }
         if let Some(d) = doc
@@ -933,6 +939,7 @@ impl eframe::App for App {
                 self.capture_ui(ui);
                 self.lightbox_ui(&ctx);
                 self.dup_prompt_ui(&ctx);
+                self.send_dialog_ui(&ctx);
             }
             Mode::Main => {
                 self.ensure_focus(&ctx);
@@ -940,6 +947,7 @@ impl eframe::App for App {
                 self.main_ui(ui);
                 self.lightbox_ui(&ctx);
                 self.dup_prompt_ui(&ctx);
+                self.send_dialog_ui(&ctx);
             }
         }
         // eframe is built without its browser feature; links (e.g. in the preview) open here.

@@ -30,6 +30,7 @@ enum Foot {
     Version,
     SaveAs,
     Expand,
+    Send,
     Help,
 }
 
@@ -46,7 +47,7 @@ impl App {
         }
 
         // ---- keys (the lightbox owns Esc while it is open) ----
-        let modal = self.lightbox.is_some() || self.dup_prompt.is_some();
+        let modal = self.lightbox.is_some() || self.dup_prompt.is_some() || self.send_dlg.is_some();
         let mut action = Action::None;
         let mut save_as = false;
         let esc_used = self.selection_keys(&ctx);
@@ -76,12 +77,16 @@ impl App {
         if save_as {
             self.save_doc_as();
         }
+        if !modal && !self.capture_naming {
+            self.send_keys(&ctx);
+        }
         match action {
             Action::Save => return self.finish_capture(&ctx, false),
             Action::Discard => return self.finish_capture(&ctx, true),
             Action::None => {}
         }
 
+        let send_label = self.send_label();
         let naming = self.capture_naming;
         let show_help = self.capture_help || ctx.input(|i| i.key_down(Key::F1));
         let mut foot: Option<Foot> = None;
@@ -123,12 +128,13 @@ impl App {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 14.0;
                 // Display order; `keep` decides what goes first when the popup is narrow.
-                let row: [(KeyItem, Foot); 5] = [
+                let row: [(KeyItem, Foot); 6] = [
                     (KeyItem { keys: &["esc"], label: t::FOOT_SAVE, keep: 5 }, Foot::Save),
                     (KeyItem { keys: &["F2"], label: t::FOOT_NAME, keep: 3 }, Foot::Name),
                     (KeyItem { keys: &["ctrl", "s"], label: t::FOOT_VERSION, keep: 1 }, Foot::Version),
                     (KeyItem { keys: &["ctrl", "shift", "s"], label: t::FOOT_SAVE_AS, keep: 2 }, Foot::SaveAs),
                     (KeyItem { keys: &["ctrl", "alt", "o"], label: t::FOOT_EXPAND, keep: 4 }, Foot::Expand),
+                    (KeyItem { keys: &["ctrl", "enter"], label: &send_label, keep: 6 }, Foot::Send),
                 ];
                 let (items, acts): (Vec<KeyItem>, Vec<Foot>) = row.into_iter().unzip();
                 let help = KeyItem { keys: &["F1"], label: t::FOOT_ALL, keep: u8::MAX };
@@ -206,6 +212,7 @@ impl App {
                 self.capture_name_focus = true;
             }
             Some(Foot::SaveAs) => self.save_doc_as(),
+            Some(Foot::Send) => self.open_send(&ctx, true),
             Some(Foot::Version) => {
                 if let Some(d) = self.capture.as_mut() {
                     d.save_now(&self.db);

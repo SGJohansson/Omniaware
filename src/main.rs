@@ -5,6 +5,7 @@ mod blob;
 mod capture;
 mod config;
 mod db;
+mod detect;
 mod doc;
 mod export;
 mod log;
@@ -13,11 +14,18 @@ mod text;
 mod markup;
 mod notice;
 mod search;
+mod send;
+mod send_ui;
 mod theme;
 mod tray;
 mod win;
 
 fn main() {
+    // `omniaware --send <target> <file>`: the elevated helper behind "as administrator".
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--send") {
+        std::process::exit(send::run_helper(&args[1..]));
+    }
     // One instance only; a second launch just exits.
     let Some(_instance) = win::single_instance() else {
         return;
@@ -29,6 +37,7 @@ fn main() {
         return;
     }
     log::init(&dir);
+    send::clean_spool(&dir);
     let cfg = config::load(&dir);
 
     // Pre-rename installs keep their database file as-is (renaming a live WAL database is not worth the risk).
