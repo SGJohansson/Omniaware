@@ -263,7 +263,7 @@ pub type Group = (&'static str, &'static [Row]);
 const GLOBAL: &[Row] = &[
     (&["Ctrl", "C", "C"], "silent capture"),
     (&["Ctrl", "Alt", "O"], "note → expand → close"),
-    (&["Ctrl", "Shift", "T"], "theme: dark → light → system → voidflow"),
+    (&["Ctrl", "Shift", "T"], "next theme"),
 ];
 const IMAGES: &[Row] = &[
     (&["Click"], "select"),
@@ -284,7 +284,7 @@ pub const CAPTURE_KEYS: &[Group] = &[
             (&["Ctrl", "V"], "paste image"),
             (&["Ctrl", "Click"], "open link"),
             (&["Ctrl", "Alt", "O"], "expand"),
-            (&["Ctrl", "Enter"], "send to suggested shell"),
+            (&["Ctrl", "Enter"], "send to suggestion"),
             (&["Ctrl", "Shift", "Enter"], "send to…"),
             (&["Shift", "Esc"], "discard"),
         ],
@@ -302,7 +302,7 @@ pub const MAIN_KEYS: &[Group] = &[
             (&["Ctrl", "Shift", "S"], "save as file"),
             (&["F2"], "name"),
             (&["Ctrl", "E"], "preview"),
-            (&["Ctrl", "Enter"], "send to suggested shell"),
+            (&["Ctrl", "Enter"], "send to suggestion"),
             (&["Ctrl", "Shift", "Enter"], "send to…"),
             (&["Ctrl", "V"], "paste image"),
             (&["Ctrl", "Click"], "open link"),

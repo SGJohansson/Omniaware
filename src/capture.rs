@@ -194,11 +194,21 @@ impl App {
                         .corner_radius(8)
                         .inner_margin(Margin::same(14))
                         .show(ui, |ui| {
-                            ui.set_min_width(540.0);
-                            ui.columns(2, |c| {
-                                theme::shortcut_groups(&mut c[0], &t::CAPTURE_KEYS[..1]);
-                                theme::status_legend(&mut c[0]);
-                                theme::shortcut_groups(&mut c[1], &t::CAPTURE_KEYS[1..]);
+                            // Always inside the popup: as wide as it allows, scrolling if too tall.
+                            let room = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
+                            let w = room.x.clamp(260.0, 600.0);
+                            ui.set_width(w);
+                            egui::ScrollArea::vertical().max_height(room.y.max(120.0)).auto_shrink([false, true]).show(ui, |ui| {
+                                if w >= 480.0 {
+                                    ui.columns(2, |c| {
+                                        theme::shortcut_groups(&mut c[0], &t::CAPTURE_KEYS[..1]);
+                                        theme::shortcut_groups(&mut c[1], &t::CAPTURE_KEYS[1..]);
+                                        theme::status_legend(&mut c[1]);
+                                    });
+                                } else {
+                                    theme::shortcut_groups(ui, t::CAPTURE_KEYS);
+                                    theme::status_legend(ui);
+                                }
                             });
                         });
                 });

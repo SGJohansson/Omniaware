@@ -475,7 +475,7 @@ impl App {
         let mut toggle = false;
         egui::Panel::right("m_keys")
             .resizable(false)
-            .exact_size(if open { 300.0 } else { 26.0 })
+            .exact_size(if open { 330.0 } else { 26.0 })
             .frame(egui::Frame::new().fill(theme::p().bg_side).inner_margin(Margin::symmetric(if open { 12 } else { 0 }, 10)))
             .show(ui, |ui| {
                 if open {
