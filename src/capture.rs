@@ -2,7 +2,7 @@
 
 use crate::app::App;
 use crate::text as t;
-use crate::theme;
+use crate::theme::{self, KeyItem};
 use egui::{Align, Id, Key, Layout, Margin, Modifiers, RichText, Sense, TextEdit, ViewportCommand};
 
 enum Action {
@@ -122,23 +122,17 @@ impl App {
             }
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 14.0;
-                let keys: [(&[&str], &str, Foot); 5] = [
-                    (&["esc"], t::FOOT_SAVE, Foot::Save),
-                    (&["F2"], t::FOOT_NAME, Foot::Name),
-                    (&["ctrl", "s"], t::FOOT_VERSION, Foot::Version),
-                    (&["ctrl", "shift", "s"], t::FOOT_SAVE_AS, Foot::SaveAs),
-                    (&["ctrl", "alt", "o"], t::FOOT_EXPAND, Foot::Expand),
+                // Display order; `keep` decides what goes first when the popup is narrow.
+                let row: [(KeyItem, Foot); 5] = [
+                    (KeyItem { keys: &["esc"], label: t::FOOT_SAVE, keep: 5 }, Foot::Save),
+                    (KeyItem { keys: &["F2"], label: t::FOOT_NAME, keep: 3 }, Foot::Name),
+                    (KeyItem { keys: &["ctrl", "s"], label: t::FOOT_VERSION, keep: 1 }, Foot::Version),
+                    (KeyItem { keys: &["ctrl", "shift", "s"], label: t::FOOT_SAVE_AS, keep: 2 }, Foot::SaveAs),
+                    (KeyItem { keys: &["ctrl", "alt", "o"], label: t::FOOT_EXPAND, keep: 4 }, Foot::Expand),
                 ];
-                for (k, label, f) in keys {
-                    if theme::key_button(ui, k, label).clicked() {
-                        foot = Some(f);
-                    }
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if theme::key_button(ui, &["F1"], t::FOOT_ALL).on_hover_text(t::TIP_F1).clicked() {
-                        foot = Some(Foot::Help);
-                    }
-                });
+                let (items, acts): (Vec<KeyItem>, Vec<Foot>) = row.into_iter().unzip();
+                let help = KeyItem { keys: &["F1"], label: t::FOOT_ALL, keep: u8::MAX };
+                foot = theme::key_row(ui, &items, &help, t::TIP_F1).map(|i| acts.get(i).copied().unwrap_or(Foot::Help));
             });
         });
 

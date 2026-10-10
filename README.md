@@ -109,7 +109,7 @@ Everything lives locally in `%APPDATA%\Omniaware\` (override with the `OMNIAWARE
 | `omniaware.db` | All entries, revision history and the search index (SQLite) |
 | `blobs\` | Images, stored content-addressed by their BLAKE3 hash |
 | `config.toml` | Settings; created with defaults on first start |
-| `omniaware.log` | Errors, if any |
+| `omniaware.log` | Errors, plus notes on slow window opens and ignored shortcut presses |
 
 How it avoids losing data:
 

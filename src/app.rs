@@ -11,6 +11,7 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+use std::time::{Duration, Instant};
 use tray_icon::menu::MenuEvent;
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
 
@@ -36,6 +37,26 @@ struct Signals {
     open_entry: std::sync::atomic::AtomicI64,
 }
 
+/// Uncloak after this long even if no frame has been painted yet.
+const REVEAL_TIMEOUT: Duration = Duration::from_millis(250);
+/// Opens slower than this are written to the log.
+const SLOW_OPEN: Duration = Duration::from_millis(200);
+/// Presses that would close a window this soon after it appeared are dropped: they were
+/// almost always made while it was still opening (see `App::settling`).
+const SETTLE: Duration = Duration::from_millis(400);
+
+/// A window placed by `win::place` that is still cloaked, waiting for a fresh frame.
+struct Reveal {
+    mode: Mode,
+    since: Instant,
+    /// Frames painted since it was placed (uncloak after two).
+    frames: u8,
+    /// Time spent in `ui` for those frames.
+    ui: Duration,
+    last: Instant,
+    longest_gap: Duration,
+}
+
 fn poke(sig: &Signals, ctx: &egui::Context, flag: fn(&Signals) -> &AtomicBool) {
     flag(sig).store(true, SeqCst);
     ctx.request_repaint();
@@ -59,7 +80,11 @@ pub struct App {
     main_rect: Option<win::Rect>,
     v_was_down: bool,
     /// Keep asking for the foreground until this moment (Windows may refuse the first try).
-    focus_until: Option<std::time::Instant>,
+    focus_until: Option<Instant>,
+    /// Placed and painting, but not on screen yet.
+    reveal: Option<Reveal>,
+    /// When the current mode appeared on screen.
+    shown_at: Option<Instant>,
     /// Last Ctrl+C+C: clipboard key and the entry it became (a repeat is not stored twice).
     last_stash: Option<(String, i64)>,
 
@@ -192,6 +217,8 @@ impl App {
             main_rect: None,
             v_was_down: false,
             focus_until: None,
+            reveal: None,
+            shown_at: None,
             last_stash: None,
             capture: None,
             capture_naming: false,
@@ -215,7 +242,45 @@ impl App {
         }
         // No ViewportCommand::Focus: winit's fallback for it fakes an Alt tap (see win::activate).
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-        self.focus_until = Some(std::time::Instant::now() + std::time::Duration::from_millis(1500));
+        let now = Instant::now();
+        self.reveal = Some(Reveal { mode: self.mode, since: now, frames: 0, ui: Duration::ZERO, last: now, longest_gap: Duration::ZERO });
+        self.shown_at = None;
+        ctx.request_repaint();
+    }
+
+    /// Uncloaks the window once a frame at its new size has been painted (or after a timeout),
+    /// then starts taking focus. Slow opens are logged with where the time went.
+    fn tick_reveal(&mut self, ctx: &egui::Context) {
+        let Some(r) = self.reveal.as_mut() else { return };
+        let now = Instant::now();
+        r.longest_gap = r.longest_gap.max(now - r.last);
+        r.last = now;
+        let waited = now - r.since;
+        if r.frames < 2 && waited < REVEAL_TIMEOUT {
+            ctx.request_repaint();
+            return;
+        }
+        if waited >= SLOW_OPEN {
+            log::note(format!(
+                "slow open: {:?} took {} ms ({} frame(s), ui {} ms, longest frame {} ms)",
+                r.mode,
+                waited.as_millis(),
+                r.frames,
+                r.ui.as_millis(),
+                r.longest_gap.as_millis()
+            ));
+        }
+        self.reveal = None;
+        win::reveal(self.hwnd);
+        self.shown_at = Some(now);
+        self.focus_until = Some(now + Duration::from_millis(1500));
+        ctx.request_repaint();
+    }
+
+    /// Still opening, or only just opened. A shortcut press that arrives now was usually made
+    /// while the window was slow to appear and would otherwise close it straight away.
+    fn settling(&self) -> bool {
+        self.reveal.is_some() || self.shown_at.is_some_and(|t| t.elapsed() < SETTLE)
     }
 
     /// Retries activation for a short while after showing; until then keys may go to the app behind.
@@ -223,7 +288,7 @@ impl App {
         let Some(until) = self.focus_until else { return };
         // Done once Windows says we are in front with focus and winit/egui has seen it too.
         let ok = win::activate(self.hwnd) && ctx.input(|i| i.focused);
-        if ok || std::time::Instant::now() > until {
+        if ok || Instant::now() > until {
             self.focus_until = None;
         } else {
             ctx.request_repaint_after(std::time::Duration::from_millis(40));
@@ -353,6 +418,8 @@ impl App {
             }
         }
         self.mode = Mode::Hidden;
+        self.reveal = None;
+        self.shown_at = None;
         ctx.send_viewport_cmd(ViewportCommand::Visible(false));
     }
 
@@ -771,16 +838,22 @@ impl eframe::App for App {
         {
             t.flash(false);
         }
+        self.tick_reveal(ctx);
         if self.sig.capture.swap(false, SeqCst) {
             // One key, three steps: popup → main window → closed.
             match self.mode {
                 Mode::Hidden => self.open_capture(ctx),
                 Mode::Capture => self.open_main(ctx),
+                Mode::Main if self.settling() => log::note("shortcut ignored: main window was still opening"),
                 Mode::Main => self.hide(ctx),
             }
         }
         if self.sig.main.swap(false, SeqCst) {
-            if self.mode == Mode::Main { self.hide(ctx) } else { self.open_main(ctx) }
+            match self.mode {
+                Mode::Main if self.settling() => log::note("shortcut ignored: main window was still opening"),
+                Mode::Main => self.hide(ctx),
+                _ => self.open_main(ctx),
+            }
         }
         if let Some(d) = self.capture.as_mut() {
             d.tick(&self.db, ctx);
@@ -792,6 +865,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        let started = Instant::now();
 
         if ctx.input(|i| i.viewport().close_requested()) && !self.quitting {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
@@ -835,6 +909,11 @@ impl eframe::App for App {
         });
         for u in urls {
             theme::open_url(&u);
+        }
+        if let Some(r) = self.reveal.as_mut() {
+            r.frames = r.frames.saturating_add(1);
+            r.ui += started.elapsed();
+            ctx.request_repaint();
         }
     }
 }

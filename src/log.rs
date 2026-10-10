@@ -9,6 +9,15 @@ pub fn init(dir: &Path) {
 }
 
 pub fn error(msg: impl std::fmt::Display) {
+    write(format_args!("{msg}"));
+}
+
+/// Not an error, but worth finding later (slow window opens, dropped hotkey presses).
+pub fn note(msg: impl std::fmt::Display) {
+    write(format_args!("note: {msg}"));
+}
+
+fn write(msg: std::fmt::Arguments) {
     let line = format!("[{}] {msg}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
     eprint!("{line}");
     if let Some(p) = PATH.get()

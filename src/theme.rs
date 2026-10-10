@@ -251,15 +251,87 @@ pub fn open_url(url: &str) {
     }
 }
 
-/// Clickable shortcut: mini keycaps + a short label, painted as one unit (hover lights it up).
-pub fn key_button(ui: &mut Ui, keys: &[&str], label: &str) -> egui::Response {
+const KEY_PAD: f32 = 4.0;
+const KEY_GAP: f32 = 3.0;
+const KEY_H: f32 = 17.0;
+
+/// Keycap and label galleys for a key button, laid out with a placeholder colour
+/// (the colour is chosen when painting) plus the button's total size.
+fn key_button_parts(ui: &Ui, keys: &[&str], label: &str) -> (Vec<Arc<egui::Galley>>, Arc<egui::Galley>, egui::Vec2) {
     let font = egui::FontId::monospace(10.0);
     let lab_font = egui::FontId::monospace(11.0);
-    let caps: Vec<_> = keys.iter().map(|k| ui.fonts_mut(|f| f.layout_no_wrap(k.to_string(), font.clone(), WEAK))).collect();
-    let lab = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), lab_font.clone(), WEAK));
-    let (pad, gap, h) = (4.0, 3.0, 17.0);
-    let caps_w: f32 = caps.iter().map(|g| g.size().x + 2.0 * pad + gap).sum();
-    let size = egui::vec2(caps_w + 3.0 + lab.size().x + 4.0, h);
+    let ph = Color32::PLACEHOLDER;
+    let caps: Vec<_> = keys.iter().map(|k| ui.fonts_mut(|f| f.layout_no_wrap(k.to_string(), font.clone(), ph))).collect();
+    let lab = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), lab_font, ph));
+    let caps_w: f32 = caps.iter().map(|g| g.size().x + 2.0 * KEY_PAD + KEY_GAP).sum();
+    let lab_w = if label.is_empty() { 0.0 } else { 3.0 + lab.size().x + 4.0 };
+    (caps, lab, egui::vec2(caps_w + lab_w, KEY_H))
+}
+
+/// Width `key_button` will take for these keys and label.
+pub fn key_button_width(ui: &Ui, keys: &[&str], label: &str) -> f32 {
+    key_button_parts(ui, keys, label).2.x
+}
+
+/// One entry in a `key_row`. Higher `keep` survives longer when the row is too narrow.
+pub struct KeyItem<'a> {
+    pub keys: &'a [&'a str],
+    pub label: &'a str,
+    pub keep: u8,
+}
+
+/// Which items of a row fit in `avail`: drops the lowest `keep` first (the later one on a tie)
+/// until everything, plus `reserved` on the right, fits. Returns indices in display order.
+pub fn fit_items(widths: &[f32], keep: &[u8], spacing: f32, reserved: f32, avail: f32) -> Vec<usize> {
+    let mut on: Vec<usize> = (0..widths.len()).collect();
+    let total = |on: &[usize]| on.iter().map(|&i| widths[i] + spacing).sum::<f32>() + reserved;
+    while !on.is_empty() && total(&on) > avail {
+        let drop = on.iter().enumerate().min_by_key(|&(pos, &i)| (keep[i], std::cmp::Reverse(pos))).map(|(pos, _)| pos);
+        if let Some(pos) = drop {
+            on.remove(pos);
+        }
+    }
+    on
+}
+
+/// A row of clickable shortcuts that never overlaps: `items` left to right, `right` pinned to
+/// the right edge. When the row is too narrow, items are dropped by priority and, as a last
+/// resort, the right one loses its label. Returns the index of a clicked item
+/// (`items.len()` for `right`).
+pub fn key_row(ui: &mut Ui, items: &[KeyItem], right: &KeyItem, right_tip: &str) -> Option<usize> {
+    let spacing = ui.spacing().item_spacing.x;
+    let avail = ui.available_width();
+    let mut right_label = right.label;
+    let mut right_w = key_button_width(ui, right.keys, right_label);
+    if right_w > avail {
+        right_label = "";
+        right_w = key_button_width(ui, right.keys, right_label);
+    }
+    let widths: Vec<f32> = items.iter().map(|it| key_button_width(ui, it.keys, it.label)).collect();
+    let keep: Vec<u8> = items.iter().map(|it| it.keep).collect();
+    let shown = fit_items(&widths, &keep, spacing, right_w, avail);
+    let mut clicked = None;
+    for &i in &shown {
+        if key_button(ui, items[i].keys, items[i].label).clicked() {
+            clicked = Some(i);
+        }
+    }
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let mut r = key_button(ui, right.keys, right_label);
+        if !right_tip.is_empty() {
+            r = r.on_hover_text(right_tip);
+        }
+        if r.clicked() {
+            clicked = Some(items.len());
+        }
+    });
+    clicked
+}
+
+/// Clickable shortcut: mini keycaps + a short label, painted as one unit (hover lights it up).
+pub fn key_button(ui: &mut Ui, keys: &[&str], label: &str) -> egui::Response {
+    let (caps, lab, size) = key_button_parts(ui, keys, label);
+    let (pad, gap, h) = (KEY_PAD, KEY_GAP, KEY_H);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     let hot = resp.hovered();
     let p = ui.painter();
@@ -273,8 +345,10 @@ pub fn key_button(ui: &mut Ui, keys: &[&str], label: &str) -> egui::Response {
         p.galley(egui::pos2(r.left() + pad, r.center().y - g.size().y / 2.0), g, if hot { TEXT } else { WEAK });
         x = r.right() + gap;
     }
-    let lab_col = if hot { TEXT } else { Color32::from_rgb(104, 108, 116) };
-    p.galley(egui::pos2(x + 3.0, rect.center().y - lab.size().y / 2.0), lab, lab_col);
+    if !label.is_empty() {
+        let lab_col = if hot { TEXT } else { Color32::from_rgb(104, 108, 116) };
+        p.galley(egui::pos2(x + 3.0, rect.center().y - lab.size().y / 2.0), lab, lab_col);
+    }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -296,4 +370,30 @@ pub fn status_legend(ui: &mut Ui) {
     }
     ui.label(RichText::new(t::LEGEND_RING).color(FAINT).size(11.0));
     ui.add_space(10.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_items;
+
+    #[test]
+    fn everything_fits() {
+        assert_eq!(fit_items(&[50.0, 50.0, 50.0], &[1, 2, 3], 10.0, 40.0, 500.0), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn drops_lowest_priority_first_keeps_order() {
+        // 3×(50+10) + 40 = 220 > 170 → drop keep=1 (index 1) → 160 fits.
+        assert_eq!(fit_items(&[50.0, 50.0, 50.0], &[3, 1, 2], 10.0, 40.0, 170.0), vec![0, 2]);
+    }
+
+    #[test]
+    fn ties_drop_the_later_item() {
+        assert_eq!(fit_items(&[50.0, 50.0, 50.0], &[1, 1, 1], 10.0, 0.0, 130.0), vec![0, 1]);
+    }
+
+    #[test]
+    fn nothing_fits() {
+        assert!(fit_items(&[50.0, 50.0], &[1, 2], 10.0, 100.0, 90.0).is_empty());
+    }
 }

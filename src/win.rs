@@ -13,6 +13,7 @@ pub struct Rect {
 mod imp {
     use super::Rect;
     use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, POINT, RECT};
+    use windows::Win32::Graphics::Dwm::{DWMWA_CLOAK, DwmSetWindowAttribute};
     use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
     use windows::Win32::System::Threading::{AttachThreadInput, CreateMutexW, GetCurrentThreadId};
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
@@ -65,7 +66,7 @@ mod imp {
         Some(Rect { x: r.left, y: r.top, w: r.right - r.left, h: r.bottom - r.top })
     }
 
-    /// Hide → set taskbar presence → position/size/z-order → show → foreground.
+    /// Hide → set taskbar presence → position/size/z-order → show cloaked (see `reveal`).
     /// `rect: None` centres a `size` (logical px) on the work area of the monitor under the cursor.
     pub fn place(h: isize, rect: Option<Rect>, size: (f32, f32), topmost: bool, taskbar: bool) {
         if h == 0 {
@@ -101,8 +102,27 @@ mod imp {
             });
             let z = if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST };
             let _ = SetWindowPos(wnd, Some(z), r.x, r.y, r.w, r.h, SWP_FRAMECHANGED);
+            // Shown but cloaked: Windows counts it as visible, so egui paints it at the new size,
+            // while DWM draws nothing. `reveal` uncloaks once a fresh frame is on screen; without
+            // this, the frame from the previous size flashes for a moment, stretched.
+            cloak(wnd, true);
             let _ = ShowWindow(wnd, SW_SHOW);
         }
+    }
+
+    fn cloak(wnd: HWND, on: bool) {
+        let v: i32 = on.into();
+        unsafe {
+            let _ = DwmSetWindowAttribute(wnd, DWMWA_CLOAK, &v as *const i32 as *const _, size_of::<i32>() as u32);
+        }
+    }
+
+    /// Uncloak a window placed by `place` and bring it to the foreground.
+    pub fn reveal(h: isize) {
+        if h == 0 {
+            return;
+        }
+        cloak(hwnd(h), false);
         activate(h);
     }
 
@@ -293,6 +313,7 @@ mod imp {
         None
     }
     pub fn place(_h: isize, _rect: Option<Rect>, _size: (f32, f32), _topmost: bool, _taskbar: bool) {}
+    pub fn reveal(_h: isize) {}
     pub fn activate(_h: isize) -> bool {
         true
     }
