@@ -4,7 +4,7 @@ A lightweight, keyboard-first home for everything I don't want to lose: clipboar
 
 I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markdown editor and browser-based note tools. The goals are simple: it should be there the instant I need it, stay out of the way when I don't, and never lose a single character — not even on a power cut.
 
-> **Status:** early development (v0.5). Windows 10/11 only. The interface is in British English.
+> **Status:** early development (v0.6). Windows 10/11 only. The interface is in British English.
 
 ![Omniaware main window: timeline, calendar and named entries](assets/screenshots/main-window.png)
 
@@ -28,6 +28,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 - **Export several at once** — select entries in any list and press `Ctrl+Shift+S` (or *export…*). One entry is written exactly as it is; several become one plain-text file, oldest first, each under a one-line header with its date, name and image count. Images are attachments, so the text is clean.
 - **Named snippets** — give an entry a name (`F2`) and it becomes a reusable snippet, much like an AutoHotkey text store. `Enter` or `Tab` takes you straight back to the text.
 - **At a glance** — the timeline shows each entry's word count, number of images, size on disk and links next to the time.
+- **Themes** — dark, light, system (follows Windows, switching live) and VoidFlow, after [voidflow.tech](https://voidflow.tech/): near-black panels, phosphor-green text and a crimson edge, with optional scanlines. `Ctrl+Shift+T` or the theme button in the main window cycles through them; the choice is remembered.
 - **Crash-safe by design** — see [Data and durability](#data-and-durability).
 
 ## Keyboard shortcuts
@@ -39,6 +40,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 | `Ctrl+C` `C` | Save the clipboard silently (hold `Ctrl`, tap `C` twice) |
 | `Ctrl+Alt+O` (or `AltGr+O`) | 1st press: capture popup · 2nd: expand to the main window · 3rd: close |
 | Tray icon click | Capture popup |
+| `Ctrl+Shift+T` (in Omniaware) | Next theme: dark → light → system → voidflow |
 
 **Capture popup**
 
@@ -123,6 +125,8 @@ How it avoids losing data:
 
 ```toml
 renderer = "wgpu"            # "glow" switches to OpenGL if the GPU driver misbehaves
+theme = "dark"               # "light", "system" (follows Windows) or "voidflow"
+scanlines = false            # faint CRT scanlines over the VoidFlow theme
 
 [hotkeys]
 capture = "ctrl+alt+KeyO"    # modifiers: ctrl / alt / shift / super

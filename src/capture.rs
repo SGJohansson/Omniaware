@@ -92,7 +92,7 @@ impl App {
         let mut img_act = None;
 
         // ---- header (drag handle) ----
-        egui::Panel::top("cap_hdr").frame(bar(theme::BG, 12, 8)).show(ui, |ui| {
+        egui::Panel::top("cap_hdr").frame(bar(theme::p().bg, 12, 8)).show(ui, |ui| {
             // Drag area first, so widgets added afterwards stay clickable on top of it.
             if ui.interact(ui.max_rect(), Id::new("cap_drag"), Sense::drag()).drag_started() {
                 ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
@@ -104,7 +104,7 @@ impl App {
                         (None, true) => t::dest_named(None),
                         (None, false) => t::dest_journal(&theme::day_short(today)),
                     };
-                    ui.label(RichText::new(dest).color(theme::WEAK).size(12.0));
+                    ui.label(RichText::new(dest).color(theme::p().weak).size(12.0));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         doc.indicator(ui);
                     });
@@ -113,7 +113,7 @@ impl App {
         });
 
         // ---- footer: images (if any) + one slim row of clickable shortcuts ----
-        egui::Panel::bottom("cap_ftr").frame(bar(theme::BG, 12, 7)).show(ui, |ui| {
+        egui::Panel::bottom("cap_ftr").frame(bar(theme::p().bg, 12, 7)).show(ui, |ui| {
             if !doc.images.is_empty() {
                 if let Some(a) = doc.thumbs(ui, &dir, crate::doc::THUMB) {
                     img_act = Some(a);
@@ -139,10 +139,10 @@ impl App {
         // ---- body ----
         let mut name_done: Option<NameDone> = None;
         let focus_name = std::mem::take(&mut self.capture_name_focus);
-        egui::CentralPanel::default().frame(bar(theme::BG, 12, 6)).show(ui, |ui| {
+        egui::CentralPanel::default().frame(bar(theme::p().bg, 12, 6)).show(ui, |ui| {
             if naming {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(t::NAME_LABEL).color(theme::WEAK));
+                    ui.label(RichText::new(t::NAME_LABEL).color(theme::p().weak));
                     let r = ui.add(
                         TextEdit::singleline(&mut doc.name)
                             .id(Id::new("cap_name"))
@@ -165,12 +165,12 @@ impl App {
                         name_done = Some(if enter { NameDone::Enter } else { NameDone::Leave });
                     }
                     theme::key_hint(ui, &["enter"]);
-                    ui.label(RichText::new(t::NAME_BACK).color(theme::WEAK).size(11.0));
+                    ui.label(RichText::new(t::NAME_BACK).color(theme::p().weak).size(11.0));
                     theme::key_hint(ui, &["ctrl", "enter"]);
-                    ui.label(RichText::new(t::NAME_CLOSE).color(theme::WEAK).size(11.0));
+                    ui.label(RichText::new(t::NAME_CLOSE).color(theme::p().weak).size(11.0));
                 });
                 if let Some(m) = &doc.name_msg {
-                    ui.label(RichText::new(m).color(theme::WARN).size(12.0));
+                    ui.label(RichText::new(m).color(theme::p().warn).size(12.0));
                 }
                 ui.add_space(4.0);
             }
@@ -183,8 +183,8 @@ impl App {
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .show(&ctx, |ui| {
                     egui::Frame::new()
-                        .fill(theme::BG_SIDE)
-                        .stroke(egui::Stroke::new(1.0, theme::LINE))
+                        .fill(theme::p().bg_side)
+                        .stroke(egui::Stroke::new(1.0, theme::p().line))
                         .corner_radius(8)
                         .inner_margin(Margin::same(14))
                         .show(ui, |ui| {

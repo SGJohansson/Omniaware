@@ -90,7 +90,7 @@ const META_W: f32 = 146.0;
 
 /// "2 images │ 312 kB" (unique files, so copies add nothing) or "48 words", plus "│ 2 links".
 fn row_meta(ui: &Ui, dir: &std::path::Path, it: &Item) -> std::sync::Arc<egui::Galley> {
-    let (acc, dim, faint) = (theme::ACCENT, theme::WEAK, theme::FAINT);
+    let (acc, dim, faint) = (theme::p().accent, theme::p().weak, theme::p().faint);
     if it.blobs.is_empty() {
         let n = it.words.to_string();
         let l = it.links.to_string();
@@ -149,11 +149,11 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, o: RowOpts<'_>) -> RowOut 
     let h = if two_line { 50.0 } else { 32.0 };
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), h), Sense::click());
     let bg = if o.checked {
-        Some(Color32::from_rgb(24, 46, 45))
+        Some(theme::p().row_sel)
     } else if it.is_event {
-        Some(theme::ACCENT_DIM)
+        Some(theme::p().accent_dim)
     } else if o.current || resp.hovered() {
-        Some(Color32::from_rgb(34, 36, 41))
+        Some(theme::p().hover)
     } else {
         None
     };
@@ -166,11 +166,11 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, o: RowOpts<'_>) -> RowOut 
     let box_r = egui::Rect::from_center_size(egui::pos2(rect.left() + 13.0, line_cy), egui::vec2(13.0, 13.0));
     let box_resp = ui.interact(box_r.expand(4.0), ui.id().with(("row_box", it.id)), Sense::click());
     if o.boxes || o.checked || resp.hovered() || box_resp.hovered() {
-        let stroke = if o.checked || box_resp.hovered() { theme::ACCENT } else { Color32::from_rgb(78, 82, 92) };
+        let stroke = if o.checked || box_resp.hovered() { theme::p().accent } else { theme::p().faint };
         let p = ui.painter();
-        p.rect(box_r, 3.0, if o.checked { theme::ACCENT_DIM } else { theme::BG_FIELD }, egui::Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
+        p.rect(box_r, 3.0, if o.checked { theme::p().accent_dim } else { theme::p().bg_field }, egui::Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
         if o.checked {
-            p.text(box_r.center(), Align2::CENTER_CENTER, "✓", FontId::monospace(11.0), theme::ACCENT);
+            p.text(box_r.center(), Align2::CENTER_CENTER, "✓", FontId::monospace(11.0), theme::p().accent);
         }
     }
 
@@ -183,55 +183,55 @@ fn row(ui: &mut Ui, dir: &std::path::Path, it: &Item, o: RowOpts<'_>) -> RowOut 
             .maintain_aspect_ratio(true)
             .corner_radius(3)
             .paint_at(ui, tr);
-        ui.painter().rect_stroke(tr, 3.0, egui::Stroke::new(1.0, theme::LINE), egui::StrokeKind::Outside);
+        ui.painter().rect_stroke(tr, 3.0, egui::Stroke::new(1.0, theme::p().line), egui::StrokeKind::Outside);
         text_right = tr.left() - 8.0;
     }
     let clip = egui::Rect::from_min_max(rect.min, egui::pos2(text_right, rect.max.y));
     let p = ui.painter_at(clip);
     let font = FontId::monospace(13.0);
     let small = FontId::monospace(12.0);
-    let fg = if it.is_event { theme::ACCENT } else { theme::TEXT };
+    let fg = if it.is_event { theme::p().accent } else { theme::p().text };
     let mut x = rect.left() + BOX_W;
     let cy = line_cy;
-    p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, o.time, small.clone(), theme::WEAK);
+    p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, o.time, small.clone(), theme::p().weak);
     x += time_w;
     // Summary column: images and their size on disk, or the word count for text-only entries.
     let meta = row_meta(ui, dir, it);
     let mw = meta.size().x;
-    p.galley(egui::pos2(x, cy - meta.size().y / 2.0), meta, theme::WEAK);
+    p.galley(egui::pos2(x, cy - meta.size().y / 2.0), meta, theme::p().weak);
     x += META_W.max(mw + 16.0);
     let glyph = if it.is_event { "◆" } else if it.name.is_some() { "#" } else { "·" };
-    p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, glyph, font.clone(), if it.is_event { theme::ACCENT } else { theme::WEAK });
+    p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, glyph, font.clone(), if it.is_event { theme::p().accent } else { theme::p().weak });
     x += 20.0;
     let text_x = x;
     if let Some(n) = &it.name {
-        let g = p.layout_no_wrap(n.clone(), small.clone(), theme::TEXT);
+        let g = p.layout_no_wrap(n.clone(), small.clone(), theme::p().text);
         let chip = egui::Rect::from_min_size(egui::pos2(x, cy - 10.0), egui::vec2(g.size().x + 12.0, 20.0));
-        p.rect_filled(chip, 4.0, theme::BG_FIELD);
-        p.rect_stroke(chip, 4.0, egui::Stroke::new(1.0, theme::LINE), egui::StrokeKind::Inside);
-        p.galley(egui::pos2(x + 6.0, cy - g.size().y / 2.0), g, theme::TEXT);
+        p.rect_filled(chip, 4.0, theme::p().bg_field);
+        p.rect_stroke(chip, 4.0, egui::Stroke::new(1.0, theme::p().line), egui::StrokeKind::Inside);
+        p.galley(egui::pos2(x + 6.0, cy - g.size().y / 2.0), g, theme::p().text);
         x += chip.width() + 8.0;
     }
     let (text, col) = match (it.preview.is_empty(), it.images) {
         (false, _) => (it.preview.clone(), fg),
-        (true, 0) => (t::ROW_EMPTY.to_string(), theme::WEAK),
-        (true, 1) => (t::ROW_IMAGE.to_string(), theme::WEAK),
-        (true, _) => (t::ROW_IMAGES.to_string(), theme::WEAK),
+        (true, 0) => (t::ROW_EMPTY.to_string(), theme::p().weak),
+        (true, 1) => (t::ROW_IMAGE.to_string(), theme::p().weak),
+        (true, _) => (t::ROW_IMAGES.to_string(), theme::p().weak),
     };
     p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, text, font, col);
 
     // Search: the matching line, matches marked.
     if two_line {
         let g = snippet_galley(ui, &it.snippet, &it.marks);
-        p.galley(egui::pos2(text_x, rect.top() + 30.0), g, theme::WEAK);
+        p.galley(egui::pos2(text_x, rect.top() + 30.0), g, theme::p().weak);
     }
     RowOut { resp: resp.on_hover_cursor(egui::CursorIcon::PointingHand), toggled: box_resp.clicked() }
 }
 
 fn snippet_galley(ui: &Ui, text: &str, marks: &[std::ops::Range<usize>]) -> std::sync::Arc<egui::Galley> {
     let font = FontId::monospace(11.5);
-    let plain = egui::TextFormat::simple(font.clone(), Color32::from_rgb(150, 154, 162));
-    let hit = egui::TextFormat { background: theme::ACCENT_DIM, ..egui::TextFormat::simple(font, theme::ACCENT) };
+    let plain = egui::TextFormat::simple(font.clone(), theme::p().soft);
+    let hit = egui::TextFormat { background: theme::p().accent_dim, ..egui::TextFormat::simple(font, theme::p().accent) };
     let mut job = egui::text::LayoutJob::default();
     let mut at = 0;
     for m in marks {
@@ -261,14 +261,14 @@ enum Bulk {
 }
 
 fn select_all_button(ui: &mut Ui) -> bool {
-    ui.add(egui::Button::new(RichText::new(t::BTN_SELECT_ALL).size(12.0).color(theme::WEAK)).frame(false))
+    ui.add(egui::Button::new(RichText::new(t::BTN_SELECT_ALL).size(12.0).color(theme::p().weak)).frame(false))
         .on_hover_text("Ctrl+A")
         .clicked()
 }
 
 fn empty_note(ui: &mut Ui, text: &str) {
     ui.add_space(24.0);
-    ui.label(RichText::new(text).color(theme::WEAK));
+    ui.label(RichText::new(text).color(theme::p().weak));
 }
 
 impl App {
@@ -445,7 +445,7 @@ impl App {
         self.side_bar(ui);
         self.shortcut_panel(ui);
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(theme::BG).inner_margin(Margin::symmetric(20, 14)))
+            .frame(egui::Frame::new().fill(theme::p().bg).inner_margin(Margin::symmetric(20, 14)))
             .show(ui, |ui| {
                 if self.main.editor.is_some() {
                     self.editor_view(ui);
@@ -473,14 +473,14 @@ impl App {
         egui::Panel::right("m_keys")
             .resizable(false)
             .exact_size(if open { 300.0 } else { 26.0 })
-            .frame(egui::Frame::new().fill(theme::BG_SIDE).inner_margin(Margin::symmetric(if open { 12 } else { 0 }, 10)))
+            .frame(egui::Frame::new().fill(theme::p().bg_side).inner_margin(Margin::symmetric(if open { 12 } else { 0 }, 10)))
             .show(ui, |ui| {
                 if open {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(t::SHORTCUTS).family(theme::medium()));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             toggle = ui.add(egui::Button::new("›").frame(false)).on_hover_text(t::TIP_COLLAPSE).clicked();
-                            ui.label(RichText::new("F1").color(theme::WEAK).size(11.5));
+                            ui.label(RichText::new("F1").color(theme::p().weak).size(11.5));
                         });
                     });
                     ui.add_space(8.0);
@@ -493,11 +493,11 @@ impl App {
                     let rect = ui.max_rect();
                     let resp = ui.interact(rect, Id::new("keys_tab"), Sense::click()).on_hover_text(t::TIP_SHORTCUTS);
                     if resp.hovered() {
-                        ui.painter().rect_filled(rect, 0.0, Color32::from_rgb(30, 32, 36));
+                        ui.painter().rect_filled(rect, 0.0, theme::p().tint);
                     }
-                    let g = ui.painter().layout_no_wrap(t::SHORTCUTS_TAB.into(), FontId::monospace(11.5), theme::WEAK);
+                    let g = ui.painter().layout_no_wrap(t::SHORTCUTS_TAB.into(), FontId::monospace(11.5), theme::p().weak);
                     let pos = egui::pos2(rect.center().x - g.size().y / 2.0, rect.top() + 16.0 + g.size().x);
-                    ui.painter().add(egui::epaint::TextShape::new(pos, g, theme::WEAK).with_angle(-std::f32::consts::FRAC_PI_2));
+                    ui.painter().add(egui::epaint::TextShape::new(pos, g, theme::p().weak).with_angle(-std::f32::consts::FRAC_PI_2));
                     toggle = resp.clicked();
                 }
             });
@@ -519,8 +519,10 @@ impl App {
         };
         let mut close = false;
         let mut new = false;
+        let mut cycle = false;
+        let theme_name = self.theme.name();
         egui::Panel::top("m_top")
-            .frame(egui::Frame::new().fill(theme::BG_SIDE).inner_margin(Margin { left: 14, right: 12, top: 11, bottom: 10 }))
+            .frame(egui::Frame::new().fill(theme::p().bg_side).inner_margin(Margin { left: 14, right: 12, top: 11, bottom: 10 }))
             .show(ui, |ui| {
                 if ui.interact(ui.max_rect(), Id::new("m_drag"), Sense::drag()).drag_started() {
                     ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
@@ -528,29 +530,35 @@ impl App {
                 ui.horizontal(|ui| {
                         // Wordmark: bold name, version right after it (baseline-aligned), then the section.
                         ui.spacing_mut().item_spacing.x = 7.0;
-                        ui.label(RichText::new("Omniaware").family(crate::markup::bold_family()).size(19.0).color(theme::ACCENT));
+                        ui.label(RichText::new("Omniaware").family(crate::markup::bold_family()).size(19.0).color(theme::p().accent));
                         ui.with_layout(Layout::left_to_right(Align::Max), |ui| {
                             ui.spacing_mut().item_spacing.x = 7.0;
                             ui.add_space(-2.0);
-                            ui.label(RichText::new(concat!("v", env!("CARGO_PKG_VERSION"))).size(11.5).color(theme::FAINT));
+                            ui.label(RichText::new(concat!("v", env!("CARGO_PKG_VERSION"))).size(11.5).color(theme::p().faint));
                             ui.add_space(10.0);
-                            ui.label(RichText::new(format!("/  {section}")).color(theme::WEAK));
+                            ui.label(RichText::new(format!("/  {section}")).color(theme::p().weak));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 close = ui.add(egui::Button::new("✕").frame(false)).on_hover_text(t::TIP_CLOSE).clicked();
                                 ui.add_space(6.0);
                                 new = ui.button(t::BTN_NEW).on_hover_text("Ctrl+N").clicked();
                                 ui.add_space(10.0);
                                 let (sep, _) = ui.allocate_exact_size(egui::vec2(1.0, 18.0), Sense::hover());
-                                ui.painter().rect_filled(sep, 0.0, theme::LINE);
+                                ui.painter().rect_filled(sep, 0.0, theme::p().line);
                                 ui.add_space(10.0);
                                 if theme::site_link(ui) {
                                     theme::open_url(theme::SITE_URL);
                                 }
+                                ui.add_space(10.0);
+                                cycle = theme::quiet_button(ui, theme_name).on_hover_text(t::TIP_THEME).clicked();
                             });
                         });
                     })
 ;
             });
+        if cycle {
+            let ctx = ui.ctx().clone();
+            self.cycle_theme(&ctx);
+        }
         if close {
             let ctx = ui.ctx().clone();
             self.hide(&ctx);
@@ -568,14 +576,14 @@ impl App {
         egui::Panel::left("m_side")
             .resizable(false)
             .exact_size(214.0)
-            .frame(egui::Frame::new().fill(theme::BG_SIDE).inner_margin(Margin::symmetric(10, 10)))
+            .frame(egui::Frame::new().fill(theme::p().bg_side).inner_margin(Margin::symmetric(10, 10)))
             .show(ui, |ui| {
                 // search pill
                 let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
                 let p = ui.painter_at(rect);
-                p.rect(rect, 5.0, theme::BG_FIELD, egui::Stroke::new(1.0, theme::LINE), egui::StrokeKind::Inside);
-                p.text(rect.left_center() + egui::vec2(10.0, 0.0), Align2::LEFT_CENTER, t::SEARCH, FontId::monospace(13.0), theme::WEAK);
-                p.text(rect.right_center() - egui::vec2(10.0, 0.0), Align2::RIGHT_CENTER, "Ctrl K", FontId::monospace(11.0), theme::WEAK);
+                p.rect(rect, 5.0, theme::p().bg_field, egui::Stroke::new(1.0, theme::p().line), egui::StrokeKind::Inside);
+                p.text(rect.left_center() + egui::vec2(10.0, 0.0), Align2::LEFT_CENTER, t::SEARCH, FontId::monospace(13.0), theme::p().weak);
+                p.text(rect.right_center() - egui::vec2(10.0, 0.0), Align2::RIGHT_CENTER, "Ctrl K", FontId::monospace(11.0), theme::p().weak);
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     goto = Some(View::Search);
                 }
@@ -584,9 +592,9 @@ impl App {
                 let cur = if self.main.editor.is_some() { None } else { Some(self.main.view) };
                 for (v, label) in [(View::Timeline, t::NAV_TIMELINE), (View::Named, t::NAV_NAMED), (View::Trash, t::NAV_BIN)] {
                     let on = cur == Some(v);
-                    let txt = RichText::new(label).color(if on { theme::TEXT } else { theme::WEAK });
+                    let txt = RichText::new(label).color(if on { theme::p().text } else { theme::p().weak });
                     let b = egui::Button::new(txt)
-                        .fill(if on { Color32::from_rgb(34, 36, 41) } else { Color32::TRANSPARENT })
+                        .fill(if on { theme::p().hover } else { Color32::TRANSPARENT })
                         .stroke(egui::Stroke::NONE)
                         .min_size(egui::vec2(ui.available_width(), 26.0));
                     if ui.add(b).clicked() {
@@ -620,7 +628,7 @@ impl App {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     for wd in t::WD_LETTER {
                         let (r, _) = ui.allocate_exact_size(egui::vec2(cell, 18.0), Sense::hover());
-                        ui.painter().text(r.center(), Align2::CENTER_CENTER, wd, FontId::monospace(11.0), theme::WEAK);
+                        ui.painter().text(r.center(), Align2::CENTER_CENTER, wd, FontId::monospace(11.0), theme::p().weak);
                     }
                 });
                 let offset = m.weekday().num_days_from_monday() as i64;
@@ -634,20 +642,20 @@ impl App {
                             let p = ui.painter();
                             let inside = d.month() == m.month();
                             if d == self.main.day {
-                                p.rect_filled(r.shrink(1.5), 4.0, theme::ACCENT_DIM);
+                                p.rect_filled(r.shrink(1.5), 4.0, theme::p().accent_dim);
                             } else if resp.hovered() {
-                                p.rect_filled(r.shrink(1.5), 4.0, Color32::from_rgb(34, 36, 41));
+                                p.rect_filled(r.shrink(1.5), 4.0, theme::p().hover);
                             }
                             let col = if d == today {
-                                theme::ACCENT
+                                theme::p().accent
                             } else if inside {
-                                theme::TEXT
+                                theme::p().text
                             } else {
-                                Color32::from_rgb(70, 73, 80)
+                                theme::p().off_month
                             };
                             p.text(r.center() - egui::vec2(0.0, 2.0), Align2::CENTER_CENTER, d.day().to_string(), FontId::monospace(11.5), col);
                             if inside && self.main.dots.contains(&d.day()) {
-                                p.circle_filled(egui::pos2(r.center().x, r.bottom() - 4.0), 1.8, theme::ACCENT);
+                                p.circle_filled(egui::pos2(r.center().x, r.bottom() - 4.0), 1.8, theme::p().accent);
                             }
                             if resp.clicked() {
                                 pick_day = Some(d);
@@ -746,20 +754,20 @@ impl App {
             .show_separator_line(false)
             .show(ui, |ui| {
         egui::Frame::new()
-            .fill(Color32::from_rgb(24, 40, 39))
-            .stroke(egui::Stroke::new(1.0, theme::ACCENT_DIM))
+            .fill(theme::p().accent_fill)
+            .stroke(egui::Stroke::new(1.0, theme::p().accent_dim))
             .corner_radius(6)
             .inner_margin(Margin::symmetric(10, 5))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(t::selected(n)).color(theme::ACCENT).family(theme::medium()));
+                    ui.label(RichText::new(t::selected(n)).color(theme::p().accent).family(theme::medium()));
                     ui.add_space(8.0);
                     if trash {
                         if theme::quiet_button(ui, t::BTN_RESTORE).clicked() {
                             act = Some(Bulk::Restore);
                         }
                         let lbl = if confirm { t::purge_confirm(n) } else { t::BTN_DELETE_FOREVER.to_string() };
-                        if ui.button(RichText::new(lbl).color(theme::ERR)).clicked() {
+                        if ui.button(RichText::new(lbl).color(theme::p().err)).clicked() {
                             act = Some(Bulk::Purge);
                         }
                     } else {
@@ -769,7 +777,7 @@ impl App {
                         if theme::quiet_button(ui, t::BTN_EXPORT).on_hover_text(t::TIP_EXPORT).clicked() {
                             act = Some(Bulk::Export);
                         }
-                        if ui.button(RichText::new(t::BTN_DELETE).color(theme::ERR)).on_hover_text(t::TIP_TO_BIN).clicked() {
+                        if ui.button(RichText::new(t::BTN_DELETE).color(theme::p().err)).on_hover_text(t::TIP_TO_BIN).clicked() {
                             act = Some(Bulk::Delete);
                         }
                     }
@@ -841,7 +849,15 @@ impl App {
             ui.label(RichText::new(theme::day_long(day, today)).family(theme::medium()).size(18.0));
             let events = self.main.items.iter().filter(|i| i.is_event).count();
             let meta = t::day_meta(self.main.items.len() - events, events);
-            ui.label(RichText::new(meta).color(theme::WEAK).size(12.0));
+            // Narrow window: the entry count and "select all" give way before they overlap the date.
+            let meta_w = ui.fonts_mut(|f| f.layout_no_wrap(meta.clone(), FontId::monospace(12.0), Color32::PLACEHOLDER).size().x);
+            let arrows_w = 64.0;
+            let all_w = 96.0;
+            let room = ui.available_width() - arrows_w;
+            let show_all = !self.main.items.is_empty() && room >= all_w;
+            if room - if show_all { all_w } else { 0.0 } >= meta_w + 16.0 {
+                ui.label(RichText::new(meta).color(theme::p().weak).size(12.0));
+            }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.button("›").clicked() {
                     step = 1;
@@ -849,7 +865,7 @@ impl App {
                 if ui.button("‹").clicked() {
                     step = -1;
                 }
-                if !self.main.items.is_empty() {
+                if show_all {
                     ui.add_space(8.0);
                     all = select_all_button(ui);
                 }
@@ -944,7 +960,7 @@ impl App {
             if !self.main.list.is_empty() {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let lbl = if confirm_empty { t::BTN_SURE } else { t::BTN_EMPTY_BIN };
-                    empty = ui.button(RichText::new(lbl).color(theme::ERR)).clicked();
+                    empty = ui.button(RichText::new(lbl).color(theme::p().err)).clicked();
                     ui.add_space(4.0);
                     all = select_all_button(ui);
                 });
@@ -1015,15 +1031,15 @@ impl App {
         let n = self.main.results.len();
         ui.horizontal(|ui| {
             match &self.main.query_err {
-                Some(e) => ui.label(RichText::new(t::bad_pattern(e)).color(theme::WARN).size(11.5)),
-                None => ui.label(RichText::new(t::SEARCH_HELP).color(theme::FAINT).size(11.0)),
+                Some(e) => ui.label(RichText::new(t::bad_pattern(e)).color(theme::p().warn).size(11.5)),
+                None => ui.label(RichText::new(t::SEARCH_HELP).color(theme::p().faint).size(11.0)),
             };
             if n > 0 {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if select_all_button(ui) {
                         self.main.picked = self.main.results.iter().map(|i| i.id).collect();
                     }
-                    ui.label(RichText::new(t::results(n)).color(theme::WEAK).size(11.5));
+                    ui.label(RichText::new(t::results(n)).color(theme::p().weak).size(11.5));
                 });
             }
         });
@@ -1089,7 +1105,7 @@ impl App {
         ui.horizontal(|ui| {
             back = ui.button(t::BTN_BACK).clicked();
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                discard = ui.button(RichText::new(t::BTN_DISCARD).color(theme::ERR)).clicked();
+                discard = ui.button(RichText::new(t::BTN_DISCARD).color(theme::p().err)).clicked();
                 if ui.button(t::BTN_SAVE_AS).on_hover_text(t::TIP_SAVE_AS).clicked() {
                     save_as = true;
                 }
@@ -1121,9 +1137,9 @@ impl App {
         let when = date_of(ed.created)
             .map(|d| format!("{} {}", theme::day_long(d, today), hhmm(ed.created)))
             .unwrap_or_default();
-        ui.label(RichText::new(when).color(theme::WEAK).size(12.0));
+        ui.label(RichText::new(when).color(theme::p().weak).size(12.0));
         if let Some(m) = &ed.name_msg {
-            ui.label(RichText::new(m).color(theme::WARN).size(12.0));
+            ui.label(RichText::new(m).color(theme::p().warn).size(12.0));
         }
         ui.add_space(6.0);
         if ed.preview {
@@ -1186,7 +1202,7 @@ fn resize_grip(ui: &mut Ui) {
     let r = egui::Rect::from_min_size(screen.max - egui::vec2(16.0, 16.0), egui::vec2(16.0, 16.0));
     let resp = ui.interact(r, Id::new("resize_grip"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeSouthEast);
     let p = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("grip_paint")));
-    let st = egui::Stroke::new(1.0, if resp.hovered() { theme::ACCENT } else { theme::WEAK });
+    let st = egui::Stroke::new(1.0, if resp.hovered() { theme::p().accent } else { theme::p().weak });
     for k in [4.0, 8.0, 12.0] {
         p.line_segment([egui::pos2(r.right() - k - 2.0, r.bottom() - 2.0), egui::pos2(r.right() - 2.0, r.bottom() - k - 2.0)], st);
     }

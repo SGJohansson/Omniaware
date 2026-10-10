@@ -105,8 +105,6 @@ struct St {
     link: bool,
 }
 
-pub const CODE_FG: Color32 = Color32::from_rgb(159, 225, 203);
-
 pub fn bold_family() -> FontFamily {
     FontFamily::Name("bold".into())
 }
@@ -261,27 +259,27 @@ fn format(s: St, base: &FontId) -> TextFormat {
         };
     let family = if (s.head > 0 || s.bold) && !s.mark { bold_family() } else { base.family.clone() };
     let color = if s.link {
-        theme::ACCENT
+        theme::p().accent
     } else if s.mark {
-        theme::FAINT
+        theme::p().faint
     } else if s.list {
-        theme::ACCENT
+        theme::p().accent
     } else if s.code {
-        CODE_FG
+        theme::p().code
     } else if s.done || s.quote {
-        theme::WEAK
+        theme::p().weak
     } else if s.head > 0 {
-        Color32::from_rgb(240, 242, 245)
+        theme::p().heading
     } else {
-        theme::TEXT
+        theme::p().text
     };
     TextFormat {
         font_id: FontId::new(size, family),
         color,
-        background: if s.code && !s.mark { theme::BG_SIDE } else { Color32::TRANSPARENT },
+        background: if s.code && !s.mark { theme::p().bg_side } else { Color32::TRANSPARENT },
         italics: s.italic || s.quote,
-        underline: if s.link { Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.55)) } else { Stroke::NONE },
-        strikethrough: if s.done { Stroke::new(1.0, theme::WEAK) } else { Stroke::NONE },
+        underline: if s.link { Stroke::new(1.0, theme::p().accent.gamma_multiply(0.55)) } else { Stroke::NONE },
+        strikethrough: if s.done { Stroke::new(1.0, theme::p().weak) } else { Stroke::NONE },
         ..Default::default()
     }
 }

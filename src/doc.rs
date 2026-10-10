@@ -375,12 +375,12 @@ impl Doc {
     pub fn indicator(&self, ui: &mut Ui) {
         let stuck = self.dirty && self.last_edit.elapsed() > STUCK;
         let (col, tip) = match &self.status {
-            Status::Error(e) => (theme::ERR, e.clone()),
-            _ if stuck => (theme::WARN, t::ST_WAITING.to_string()),
-            _ if self.dirty && matches!(self.status, Status::Idle) => (theme::WEAK, t::ST_AUTOSAVE.to_string()),
-            Status::Saved(at) => (theme::OK, t::st_on_disk_at(at)),
-            Status::Clean => (theme::OK, t::ST_ON_DISK.to_string()),
-            Status::Idle => (theme::WEAK, t::ST_NOTHING.to_string()),
+            Status::Error(e) => (theme::p().err, e.clone()),
+            _ if stuck => (theme::p().warn, t::ST_WAITING.to_string()),
+            _ if self.dirty && matches!(self.status, Status::Idle) => (theme::p().weak, t::ST_AUTOSAVE.to_string()),
+            Status::Saved(at) => (theme::p().ok, t::st_on_disk_at(at)),
+            Status::Clean => (theme::p().ok, t::ST_ON_DISK.to_string()),
+            Status::Idle => (theme::p().weak, t::ST_NOTHING.to_string()),
         };
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
         let c = rect.center();
@@ -394,7 +394,7 @@ impl Doc {
         ui.painter().circle_filled(c, 4.0, col);
         resp.on_hover_text(tip);
         if let Status::Error(_) = self.status {
-            ui.label(egui::RichText::new(t::ST_FAILED).color(theme::ERR).size(12.0));
+            ui.label(egui::RichText::new(t::ST_FAILED).color(theme::p().err).size(12.0));
         }
     }
 
@@ -406,25 +406,25 @@ impl Doc {
         }
         ctx.request_repaint();
         let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, self.editor_id.with("toast")));
-        let g = p.layout_no_wrap(self.toast_text.clone(), egui::FontId::monospace(12.0), theme::OK.gamma_multiply(a));
+        let g = p.layout_no_wrap(self.toast_text.clone(), egui::FontId::monospace(12.0), theme::p().ok.gamma_multiply(a));
         let size = g.size() + egui::vec2(16.0, 8.0);
         let rect = egui::Rect::from_min_size(area.right_bottom() - size - egui::vec2(10.0, 10.0), size);
         p.rect(
             rect,
             5.0,
-            theme::BG.gamma_multiply(a),
-            egui::Stroke::new(1.0, theme::OK.gamma_multiply(0.5 * a)),
+            theme::p().bg.gamma_multiply(a),
+            egui::Stroke::new(1.0, theme::p().ok.gamma_multiply(0.5 * a)),
             egui::StrokeKind::Inside,
         );
-        p.galley(rect.min + egui::vec2(8.0, 4.0), g, theme::OK);
+        p.galley(rect.min + egui::vec2(8.0, 4.0), g, theme::p().ok);
     }
 
     /// Framed, full-size text editor.
     pub fn editor(&mut self, ui: &mut Ui, hint: &str) {
         let ctx = ui.ctx().clone();
         let framed = egui::Frame::new()
-            .fill(theme::BG_FIELD)
-            .stroke(egui::Stroke::new(1.0, theme::LINE))
+            .fill(theme::p().bg_field)
+            .stroke(egui::Stroke::new(1.0, theme::p().line))
             .corner_radius(6)
             .inner_margin(egui::Margin::same(10))
             .show(ui, |ui| {
@@ -505,7 +505,7 @@ impl Doc {
             // The app-wide text colour override would paint links like plain text here.
             let v = ui.visuals_mut();
             v.override_text_color = None;
-            v.widgets.noninteractive.fg_stroke.color = theme::TEXT;
+            v.widgets.noninteractive.fg_stroke.color = theme::p().text;
             egui_commonmark::CommonMarkViewer::new().max_image_width(Some(720)).show(ui, cache, &text);
         });
     }
@@ -637,7 +637,7 @@ pub fn image_menu(ui: &mut Ui, blob: &str, targets: Vec<i64>) -> Option<ImgActio
     ui.separator();
     let n = targets.len();
     let label = t::btn_remove_n(n);
-    if ui.button(egui::RichText::new(label).size(13.0).color(theme::ERR)).clicked() {
+    if ui.button(egui::RichText::new(label).size(13.0).color(theme::p().err)).clicked() {
         act = Some(ImgAction::Remove(targets));
     }
     if act.is_some() {
@@ -646,8 +646,11 @@ pub fn image_menu(ui: &mut Ui, blob: &str, targets: Vec<i64>) -> Option<ImgActio
     act
 }
 
+/// Badges drawn on top of pictures keep dark-theme colours in every theme: they sit on the image.
 const SHADE: egui::Color32 = egui::Color32::from_rgba_premultiplied(12, 13, 15, 214);
-const COPY_FG: egui::Color32 = egui::Color32::from_rgb(159, 225, 203);
+const ON_IMG_TEXT: egui::Color32 = theme::DARK.text;
+const ON_IMG_WEAK: egui::Color32 = theme::DARK.weak;
+const ON_IMG_FAINT: egui::Color32 = theme::DARK.faint;
 
 use theme::runs;
 
@@ -670,8 +673,8 @@ pub fn image_tile(
         .corner_radius(4)
         .sense(egui::Sense::click());
     let resp = egui::Frame::new()
-        .fill(theme::BG_SIDE)
-        .stroke(egui::Stroke::new(1.0, theme::LINE))
+        .fill(theme::p().bg_side)
+        .stroke(egui::Stroke::new(1.0, theme::p().line))
         .corner_radius(6)
         .inner_margin(egui::Margin::same(3))
         .show(ui, |ui| ui.add(picture))
@@ -679,12 +682,14 @@ pub fn image_tile(
         .on_hover_text(t::TIP_TILE);
     let r = resp.rect;
     let p = ui.painter().with_clip_rect(r);
-    let (dim, txt, acc) = (theme::WEAK, theme::TEXT, theme::ACCENT);
+    let pal = theme::p();
+    let acc = if pal.dark { pal.accent } else { theme::DARK.accent };
+    let (dim, txt) = (ON_IMG_WEAK, ON_IMG_TEXT);
 
     // top-left: number / copy label (+ check when selected)
     let check = if is_sel { "✓ " } else { "" };
     let (label, fg, bg) = match copy_of {
-        Some(m) => (format!("{check}{}", t::copy_of(n, m)), COPY_FG, theme::ACCENT_DIM),
+        Some(m) => (format!("{check}{}", t::copy_of(n, m)), theme::p().code, theme::p().accent_dim),
         None => (format!("{check}#{n}"), txt, SHADE),
     };
     let g = p.layout_no_wrap(label, egui::FontId::monospace(10.5), fg);
@@ -706,7 +711,7 @@ pub fn image_tile(
             ];
             let mut y = panel.top() + 7.0;
             for (lbl, val) in rows {
-                let lg = runs(ui, &[(lbl, theme::FAINT)], 9.5);
+                let lg = runs(ui, &[(lbl, ON_IMG_FAINT)], 9.5);
                 p.galley(egui::pos2(panel.right() - 7.0 - lg.size().x, y), lg.clone(), dim);
                 y += lg.size().y;
                 let vg = runs(ui, &val, 10.5);
@@ -715,7 +720,7 @@ pub fn image_tile(
             }
         } else {
             // corner badge (variant B): W×H · size
-            let f = theme::FAINT;
+            let f = ON_IMG_FAINT;
             let mut g = runs(ui, &[(&w, acc), ("×", txt), (&h, acc), (" │ ", f), (&sv, acc), (" ", dim), (su, dim)], 10.0);
             if g.size().x > r.width() - 20.0 {
                 g = runs(ui, &[(&sv, acc), (" ", dim), (su, dim)], 10.0); // narrow (tall) tile: size only
@@ -728,9 +733,9 @@ pub fn image_tile(
 
     let frame = r.expand(3.0);
     if is_sel {
-        ui.painter().rect_stroke(frame, 6.0, egui::Stroke::new(2.0, acc), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(frame, 6.0, egui::Stroke::new(2.0, pal.accent), egui::StrokeKind::Inside);
     } else if resp.hovered() {
-        ui.painter().rect_stroke(frame, 6.0, egui::Stroke::new(1.5, acc), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(frame, 6.0, egui::Stroke::new(1.5, pal.accent), egui::StrokeKind::Inside);
     }
 
     let mut act = None;

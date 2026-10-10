@@ -412,15 +412,18 @@ mod imp {
         let Some([bold, regular, small]) = s.fonts else { return };
         let k = s.scale;
         let px = |v: f32| (v * k).round() as i32;
-        let accent = if n.kind == Kind::Ok { [110, 196, 132] } else { [232, 110, 100] };
+        // Colours come from the active theme at paint time.
+        let pal = crate::theme::p();
+        let c = crate::theme::rgb3;
+        let accent = if n.kind == Kind::Ok { c(pal.ok) } else { c(pal.err) };
         unsafe {
             let fill = |r: RECT, c: [u8; 3]| {
                 let b = CreateSolidBrush(rgb(c));
                 FillRect(dc, &r, b);
                 let _ = DeleteObject(b.into());
             };
-            fill(*rc, [23, 24, 27]);
-            let b = CreateSolidBrush(rgb([52, 55, 62]));
+            fill(*rc, c(pal.bg));
+            let b = CreateSolidBrush(rgb(c(pal.key_stroke)));
             FrameRect(dc, rc, b);
             let _ = DeleteObject(b.into());
             fill(RECT { left: rc.left, top: rc.top, right: rc.left + px(3.0), bottom: rc.bottom }, accent);
@@ -438,20 +441,20 @@ mod imp {
             let _ = GetTextExtentPoint32W(dc, &title, &mut sz);
             let hint = if n.entry.is_some() { "open ↗" } else if n.kind == Kind::Error { "dismiss" } else { "" };
             SelectObject(dc, small.into());
-            SetTextColor(dc, rgb([78, 82, 92]));
+            SetTextColor(dc, rgb(c(pal.faint)));
             let mut hint_w = wide(hint);
             let mut hr = RECT { left: rc.left, top: y1 + px(1.0), right: rc.right - px(12.0), bottom: y1 + px(20.0) };
             DrawTextW(dc, &mut hint_w, &mut hr, DT_RIGHT | DT_SINGLELINE | DT_NOPREFIX);
             if !n.context.is_empty() {
                 SelectObject(dc, regular.into());
-                SetTextColor(dc, rgb([128, 132, 140]));
+                SetTextColor(dc, rgb(c(pal.weak)));
                 let mut ctx = wide(&format!(" · {}", n.context));
                 let mut cr = RECT { left: x0 + sz.cx, top: y1 + px(1.0), right: rc.right - px(64.0), bottom: y1 + px(20.0) };
                 DrawTextW(dc, &mut ctx, &mut cr, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             }
             // line 2: details
             SelectObject(dc, small.into());
-            SetTextColor(dc, rgb([150, 154, 162]));
+            SetTextColor(dc, rgb(c(pal.soft)));
             let mut d = wide(&n.detail);
             let mut dr = RECT { left: x0, top: px(36.0), right: rc.right - px(12.0), bottom: rc.bottom - px(6.0) };
             DrawTextW(dc, &mut d, &mut dr, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);

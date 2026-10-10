@@ -9,6 +9,10 @@ pub struct Config {
     pub version: u32,
     /// "wgpu" (default) or "glow" (OpenGL fallback).
     pub renderer: String,
+    /// "dark" (default), "light", "system" (follows Windows) or "voidflow". Ctrl+Shift+T cycles.
+    pub theme: String,
+    /// Faint CRT scanlines over the VoidFlow theme.
+    pub scanlines: bool,
     pub hotkeys: Hotkeys,
     pub window: WindowCfg,
 }
@@ -37,7 +41,14 @@ pub struct WindowCfg {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { version: CONFIG_VERSION, renderer: "wgpu".into(), hotkeys: Hotkeys::default(), window: WindowCfg::default() }
+        Self {
+            version: CONFIG_VERSION,
+            renderer: "wgpu".into(),
+            theme: "dark".into(),
+            scanlines: false,
+            hotkeys: Hotkeys::default(),
+            window: WindowCfg::default(),
+        }
     }
 }
 impl Default for Hotkeys {

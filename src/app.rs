@@ -100,11 +100,14 @@ pub struct App {
     pub(crate) dup_prompt: Option<(String, usize)>,
     /// Shortcut overlay in the capture popup ("?" button / hold F1).
     pub(crate) capture_help: bool,
+    pub(crate) theme: theme::ThemeChoice,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, cfg: Config, db: Db, dir: PathBuf) -> Self {
         let ctx = cc.egui_ctx.clone();
+        let theme_choice = theme::ThemeChoice::parse(&cfg.theme);
+        theme::apply(&ctx, theme_choice.resolve(ctx.system_theme() == Some(egui::Theme::Light)));
         theme::install(&ctx, cfg.window.font_size);
         egui_extras::install_image_loaders(&ctx);
 
@@ -228,6 +231,43 @@ impl App {
             lightbox: None,
             dup_prompt: None,
             capture_help: false,
+            theme: theme_choice,
+        }
+    }
+
+    // ---------- theme ----------
+
+    /// Keeps the palette in line with the chosen theme (and, for "system", with Windows).
+    fn sync_theme(&mut self, ctx: &egui::Context) {
+        let light = ctx.system_theme() == Some(egui::Theme::Light);
+        if theme::apply(ctx, self.theme.resolve(light)) {
+            ctx.request_repaint();
+        }
+    }
+
+    /// Ctrl+Shift+T / the theme button: dark → light → system → voidflow, remembered in config.
+    pub(crate) fn cycle_theme(&mut self, ctx: &egui::Context) {
+        self.theme = self.theme.next();
+        self.cfg.theme = self.theme.name().into();
+        crate::config::save(&self.dir, &self.cfg);
+        self.sync_theme(ctx);
+    }
+
+    /// The theme's own touches on top of the panels: VoidFlow's crimson edge and scanlines.
+    fn theme_overlay(&self, ctx: &egui::Context) {
+        let pal = theme::p();
+        let rect = ctx.content_rect();
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("theme_overlay")));
+        if let Some(edge) = pal.edge {
+            painter.rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(2.0, rect.height())), 0.0, edge);
+        }
+        if self.cfg.scanlines && std::ptr::eq(pal, &theme::VOIDFLOW) {
+            let shade = egui::Color32::from_black_alpha(46);
+            let mut y = rect.top() + 1.5;
+            while y < rect.bottom() {
+                painter.hline(rect.x_range(), y, egui::Stroke::new(1.0, shade));
+                y += 3.0;
+            }
         }
     }
 
@@ -459,19 +499,19 @@ impl App {
                 let b = |ui: &mut egui::Ui, t: &str, c: egui::Color32| {
                     ui.add(egui::Button::new(egui::RichText::new(t).size(12.5).color(c))).clicked()
                 };
-                if b(ui, t::BTN_COPY, theme::TEXT) {
+                if b(ui, t::BTN_COPY, theme::p().text) {
                     act = Some(doc::ImgAction::Copy(r.clone()));
                 }
-                if b(ui, t::BTN_SAVE_AS, theme::TEXT) {
+                if b(ui, t::BTN_SAVE_AS, theme::p().text) {
                     act = Some(doc::ImgAction::SaveAs(r.clone()));
                 }
-                if b(ui, t::BTN_OPEN_WITH, theme::TEXT) {
+                if b(ui, t::BTN_OPEN_WITH, theme::p().text) {
                     act = Some(doc::ImgAction::OpenWith(r.clone()));
                 }
-                if b(ui, t::BTN_REVEAL, theme::TEXT) {
+                if b(ui, t::BTN_REVEAL, theme::p().text) {
                     act = Some(doc::ImgAction::Reveal(r.clone()));
                 }
-                if b(ui, t::BTN_REMOVE, theme::ERR) {
+                if b(ui, t::BTN_REMOVE, theme::p().err) {
                     act = Some(doc::ImgAction::Remove(vec![img.id]));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -748,7 +788,7 @@ impl App {
             // 1) what happened  2) why it is harmless  3) the data — each in its own weight/colour
             ui.horizontal_top(|ui| {
                 egui::Frame::new()
-                    .stroke(egui::Stroke::new(1.0, theme::ACCENT_DIM))
+                    .stroke(egui::Stroke::new(1.0, theme::p().accent_dim))
                     .corner_radius(4)
                     .inner_margin(egui::Margin::same(2))
                     .show(ui, |ui| {
@@ -763,14 +803,14 @@ impl App {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     ui.label(egui::RichText::new(t::dup_title(n)).family(theme::medium()));
-                    ui.label(egui::RichText::new(t::DUP_NOTE).color(theme::WEAK).size(11.5));
+                    ui.label(egui::RichText::new(t::DUP_NOTE).color(theme::p().weak).size(11.5));
                     ui.add_space(10.0);
                     doc::info_chip(ui, &dir, &blob, 11.5);
                 });
             });
             ui.add_space(10.0);
             let line = ui.available_rect_before_wrap();
-            ui.painter().hline(line.x_range(), line.top(), egui::Stroke::new(1.0, theme::LINE));
+            ui.painter().hline(line.x_range(), line.top(), egui::Stroke::new(1.0, theme::p().line));
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if theme::primary_button(ui, t::BTN_ADD_COPY).clicked() {
@@ -839,6 +879,7 @@ impl eframe::App for App {
             t.flash(false);
         }
         self.tick_reveal(ctx);
+        self.sync_theme(ctx);
         if self.sig.capture.swap(false, SeqCst) {
             // One key, three steps: popup → main window → closed.
             match self.mode {
@@ -873,6 +914,12 @@ impl eframe::App for App {
                 Mode::Capture => self.finish_capture(&ctx, false),
                 _ => self.hide(&ctx),
             }
+        }
+        if self.mode != Mode::Hidden
+            && self.lightbox.is_none()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::T))
+        {
+            self.cycle_theme(&ctx);
         }
         match self.mode {
             Mode::Hidden => {
@@ -909,6 +956,9 @@ impl eframe::App for App {
         });
         for u in urls {
             theme::open_url(&u);
+        }
+        if self.mode != Mode::Hidden {
+            self.theme_overlay(&ctx);
         }
         if let Some(r) = self.reveal.as_mut() {
             r.frames = r.frames.saturating_add(1);

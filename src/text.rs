@@ -104,6 +104,8 @@ pub fn link_tip(url: &str) -> String {
 
 // ---------- capture footer ----------
 
+pub const TIP_THEME: &str = "Theme: dark → light → system → voidflow (Ctrl+Shift+T)";
+
 pub const FOOT_SAVE: &str = "save";
 pub const FOOT_NAME: &str = "name";
 pub const FOOT_VERSION: &str = "version";
@@ -223,7 +225,11 @@ pub const NO_MATCHES: &str = "No matches.";
 pub type Row = (&'static [&'static str], &'static str);
 pub type Group = (&'static str, &'static [Row]);
 
-const GLOBAL: &[Row] = &[(&["Ctrl", "C", "C"], "silent capture"), (&["Ctrl", "Alt", "O"], "note → expand → close")];
+const GLOBAL: &[Row] = &[
+    (&["Ctrl", "C", "C"], "silent capture"),
+    (&["Ctrl", "Alt", "O"], "note → expand → close"),
+    (&["Ctrl", "Shift", "T"], "theme: dark → light → system → voidflow"),
+];
 const IMAGES: &[Row] = &[
     (&["Click"], "select"),
     (&["Ctrl", "Click"], "select several"),
