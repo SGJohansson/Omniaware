@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches: [main, dev]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -34,9 +33,24 @@ jobs:
           path: target/release/omniaware.exe
           if-no-files-found: error
 
+      # A release is published whenever main carries a Cargo.toml version that has no release
+      # yet: the tag is created here, so nobody has to push one.
+      - name: Read version
+        id: ver
+        shell: bash
+        run: |
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" >/dev/null 2>&1; then echo "new=false" >> "$GITHUB_OUTPUT"; else echo "new=true" >> "$GITHUB_OUTPUT"; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.ref == 'refs/heads/main' && steps.ver.outputs.new == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Omniaware ${{ steps.ver.outputs.tag }}
           files: target/release/omniaware.exe
           generate_release_notes: true
