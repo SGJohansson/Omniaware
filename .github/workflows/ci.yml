@@ -58,6 +58,10 @@ jobs:
           v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           echo "tag=v$v" >> "$GITHUB_OUTPUT"
           if gh release view "v$v" >/dev/null 2>&1; then echo "new=false" >> "$GITHUB_OUTPUT"; else echo "new=true" >> "$GITHUB_OUTPUT"; fi
+          # Release text: docs/releases/v<version>.md if it exists; GitHub's changelog follows it.
+          notes="docs/releases/v$v.md"
+          if [ ! -f "$notes" ]; then notes="$RUNNER_TEMP/notes.md"; : > "$notes"; fi
+          echo "notes=$notes" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -67,6 +71,7 @@ jobs:
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: Omniaware ${{ steps.ver.outputs.tag }}
+          name: OA · Omniaware ${{ steps.ver.outputs.tag }}
+          body_path: ${{ steps.ver.outputs.notes }}
           files: target/release/omniaware.exe
           generate_release_notes: true
