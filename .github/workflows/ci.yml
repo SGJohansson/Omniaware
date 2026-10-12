@@ -33,15 +33,19 @@ jobs:
           path: target/release/omniaware.exe
           if-no-files-found: error
 
-      # Both binaries and a short guide, ready to unzip and run on any Windows machine.
+      # Both binaries and a short guide in one flat folder: unzip and run on any Windows machine.
+      - name: Assemble benchmark kit
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force bench-kit | Out-Null
+          Copy-Item target/release/omniaware.exe, target/release/oa-probe.exe bench-kit/
+          Copy-Item scripts/bench-kit.txt bench-kit/README.txt
+
       - name: Upload benchmark kit
         uses: actions/upload-artifact@v4
         with:
           name: omniaware-bench-kit
-          path: |
-            target/release/omniaware.exe
-            target/release/oa-probe.exe
-            scripts/bench-kit.txt
+          path: bench-kit/
           if-no-files-found: error
 
       # A release is published whenever main carries a Cargo.toml version that has no release
