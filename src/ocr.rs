@@ -95,8 +95,8 @@ impl Queue {
     }
 }
 
-/// Runs the helper process for one image.
-fn read(dir: &Path, image: &Path, language: &str) -> Done {
+/// Runs the helper process for one image (also used by Ctrl+Alt+T, on its own thread).
+pub(crate) fn read(dir: &Path, image: &Path, language: &str) -> Done {
     let spool = dir.join("ocr");
     if let Err(e) = std::fs::create_dir_all(&spool) {
         return Done::Failed(format!("{}: {e}", spool.display()));

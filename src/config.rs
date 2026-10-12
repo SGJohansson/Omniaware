@@ -59,6 +59,8 @@ pub struct Hotkeys {
     pub screenshot: String,
     /// Screenshot of the screen under the pointer at once, nothing shown ("" = off).
     pub screenshot_full: String,
+    /// Copy the text in an area of the screen (same overlay; only the text is kept) ("" = off).
+    pub text: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -96,6 +98,7 @@ impl Default for Hotkeys {
             main: String::new(),
             screenshot: "ctrl+alt+KeyS".into(),
             screenshot_full: "ctrl+alt+shift+KeyS".into(),
+            text: "ctrl+alt+KeyT".into(),
         }
     }
 }
@@ -105,8 +108,9 @@ impl Default for WindowCfg {
     }
 }
 
-/// 4: screenshot hotkeys, 5: [ocr] (written into existing files so they can be found and changed).
-pub const CONFIG_VERSION: u32 = 5;
+/// 4: screenshot hotkeys, 5: [ocr], 6: text capture hotkey (written into existing files so they
+/// can be found and changed).
+pub const CONFIG_VERSION: u32 = 6;
 
 /// %OMNIAWARE_DATA% if set, else %APPDATA%\Omniaware (moved from the pre-rename %APPDATA%\Omniware once).
 pub fn data_dir() -> PathBuf {

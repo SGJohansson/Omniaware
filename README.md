@@ -22,7 +22,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 - **Silent capture** — press `Ctrl+C` twice in quick succession and the clipboard (text or image) is saved straight to today's journal. The tray icon briefly turns green; nothing else interrupts you.
 - **One key for everything else** — `Ctrl+Alt+O` opens a small capture window pre-filled with the clipboard. Press it again and the same note expands into the main window: a day-by-day timeline, a month calendar marking days with content, named entries and a recycle bin. Press it a third time to put everything away.
 - **Screenshots** — `Ctrl+Alt+S` freezes every screen under a dimmed overlay, much like `Win+Shift+S`: drag an area, click a window, click the desktop (or press `Enter`) for the whole screen, `Esc` or a right-click to cancel. `Ctrl+Alt+Shift+S` takes the screen under the pointer at once, with nothing shown. Each shot lands in today's journal, on the clipboard and in `Pictures\OA Screenshots` as `OA 2026-10-12 14.32.07.png`, followed by the usual notice. The overlay never takes focus, so a game in borderless full screen is neither minimised nor interrupted; for games with mouselook, use `Ctrl+Alt+Shift+S`.
-- **Text in images** — every screenshot and pasted picture is read in the background with the text recognition built into Windows, so `Ctrl+K` finds the error message in last week's screenshot (the hit is shown as *in image · …*). Right-click a picture → *copy text* puts its text on the clipboard. Nothing leaves the machine, and nothing stays loaded: each picture is read by a short-lived helper process at low priority, so the background cost is unchanged.
+- **Text in images** — every screenshot and pasted picture is read in the background with the text recognition built into Windows, so `Ctrl+K` finds the error message in last week's screenshot (the hit is shown as *in image · …*). Right-click a picture → *copy text* puts its text on the clipboard, and `Ctrl+Alt+T` does the same for any area of the screen (a dialog, a video, a picture in another program), logging the text in today's journal. Nothing leaves the machine, and nothing stays loaded: each picture is read by a short-lived helper process at low priority, so the background cost is unchanged.
 - **Search** — `Ctrl+K` searches everything. Words match anywhere inside words (`affe` finds *Kaffekannor*), `*` and `?` are wildcards, and `/…/` takes a full regular expression. Each hit shows the matching line with the match highlighted; `Shift+Enter` pastes the result straight into the window you came from.
 - **Tidy up in bulk** — every list supports `Ctrl`+click, `Shift`+click and `Ctrl+Shift`+click selection, `Ctrl+A` selects the whole list on screen, and `Delete` moves the selection to the bin. The bin can restore, delete forever or be emptied.
 - **A word when it's saved** — closing a note or capturing silently shows a small notice above the system tray (what was saved, where, and how much). Click it to open the entry; hover to keep it.
@@ -55,8 +55,9 @@ Everything below is also in the app: press **`F1`** in the capture popup (an ove
 | `Ctrl+Alt+O` (or `AltGr+O`) | 1st press: quick note · 2nd: expand to the main window · 3rd: close |
 | `Ctrl+Alt+S` | Screenshot: area, window or whole screen (see below) |
 | `Ctrl+Alt+Shift+S` | Screenshot of the screen under the pointer, at once, nothing shown |
+| `Ctrl+Alt+T` | Copy the text in an area of the screen: same overlay, the text goes to the clipboard and today's journal |
 | Tray icon click | Quick note |
-| Tray icon right-click | Menu: quick note, open Omniaware, screenshot, quit |
+| Tray icon right-click | Menu: quick note, open Omniaware, screenshot, copy text from screen, quit |
 | Click a notice | Open what was just saved (hover keeps the notice) |
 
 **Screenshot overlay** (`Ctrl+Alt+S`)
@@ -69,7 +70,7 @@ Everything below is also in the app: press **`F1`** in the capture popup (an ove
 | `Enter` | Take the screen under the pointer |
 | `Esc` or right-click | Cancel |
 
-Every shot goes to today's journal, the clipboard and `Pictures\OA Screenshots`. The game or app in front keeps focus throughout.
+Every shot goes to today's journal, the clipboard and `Pictures\OA Screenshots`. With `Ctrl+Alt+T` the same overlay copies the area's *text* instead: it goes to the clipboard and is logged in today's journal as a plain text entry, and the picture is not kept. The game or app in front keeps focus throughout.
 
 **Quick note** (the capture popup)
 
@@ -223,6 +224,7 @@ capture = "ctrl+alt+KeyO"    # modifiers: ctrl / alt / shift / super
 main = ""                    # optional direct shortcut to the main window
 screenshot = "ctrl+alt+KeyS"            # "" turns a shortcut off
 screenshot_full = "ctrl+alt+shift+KeyS"
+text = "ctrl+alt+KeyT"       # copy the text in an area of the screen
 
 [window]
 width = 640.0                # capture popup

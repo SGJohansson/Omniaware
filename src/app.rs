@@ -37,6 +37,8 @@ struct Signals {
     /// Ctrl+Alt+S / Ctrl+Alt+Shift+S.
     shot: AtomicBool,
     shot_full: AtomicBool,
+    /// Ctrl+Alt+T: copy the text in an area of the screen.
+    text_shot: AtomicBool,
     /// Finished screenshots, handed over from the screenshot thread.
     shots: std::sync::Mutex<Vec<crate::shot::Outcome>>,
     /// Notice clicked: open this entry (0 = none).
@@ -142,11 +144,12 @@ impl App {
             Ok(mgr) => {
                 // `main` is optional; skip it when empty or identical to `capture`.
                 let main = if cfg.hotkeys.main == cfg.hotkeys.capture { "" } else { cfg.hotkeys.main.as_str() };
-                let specs: [(&str, fn(&Signals) -> &AtomicBool); 4] = [
+                let specs: [(&str, fn(&Signals) -> &AtomicBool); 5] = [
                     (&cfg.hotkeys.capture, |s| &s.capture),
                     (main, |s| &s.main),
                     (&cfg.hotkeys.screenshot, |s| &s.shot),
                     (&cfg.hotkeys.screenshot_full, |s| &s.shot_full),
+                    (&cfg.hotkeys.text, |s| &s.text_shot),
                 ];
                 for (spec, flag) in specs {
                     // A benchmark copy leaves the global keys to the real Omniaware.
@@ -209,18 +212,20 @@ impl App {
         let tray = match if cfg!(windows) { tray::build() } else { Err("tray: Windows only".into()) } {
             Ok(t) => {
                 let (s, c) = (sig.clone(), ctx.clone());
-                let (cap, main, shot, quit) = (t.capture_id.clone(), t.main_id.clone(), t.shot_id.clone(), t.quit_id.clone());
+                let (cap, main, shot, text, quit) =
+                    (t.capture_id.clone(), t.main_id.clone(), t.shot_id.clone(), t.text_id.clone(), t.quit_id.clone());
                 MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
                     if e.id == cap {
                         poke(&s, &c, |s| &s.capture);
                     } else if e.id == main {
                         poke(&s, &c, |s| &s.main);
-                    } else if e.id == shot {
+                    } else if e.id == shot || e.id == text {
+                        let flag: fn(&Signals) -> &AtomicBool = if e.id == shot { |s| &s.shot } else { |s| &s.text_shot };
                         // Let the menu fade out first, or it ends up in the picture.
                         let (s, c) = (s.clone(), c.clone());
                         std::thread::spawn(move || {
                             std::thread::sleep(Duration::from_millis(300));
-                            poke(&s, &c, |s| &s.shot);
+                            poke(&s, &c, flag);
                         });
                     } else if e.id == quit {
                         poke(&s, &c, |s| &s.quit);
@@ -776,13 +781,55 @@ impl App {
         self.flash_tray(ctx);
     }
 
-    /// Ctrl+Alt+S (overlay) or Ctrl+Alt+Shift+S (`full`: the screen under the pointer, at once).
-    fn screenshot(&self, ctx: &egui::Context, full: bool) {
+    /// Ctrl+Alt+S (overlay), Ctrl+Alt+Shift+S (the screen under the pointer, at once) or
+    /// Ctrl+Alt+T (the overlay, for the text in an area).
+    fn screenshot(&self, ctx: &egui::Context, mode: crate::shot::Mode) {
         let (s, c) = (self.sig.clone(), ctx.clone());
-        crate::shot::start(full, self.dir.clone(), move |o| {
+        crate::shot::start(mode, self.dir.clone(), self.cfg.ocr.language.clone(), move |o| {
             s.shots.lock().unwrap_or_else(|e| e.into_inner()).push(o);
             c.request_repaint();
         });
+    }
+
+    /// Ctrl+Alt+T: the text goes to the clipboard and, like Ctrl+C+C, into today's journal as a
+    /// plain text entry (a few bytes; the picture is not kept). The notice opens the entry.
+    fn text_capture_done(&mut self, ctx: &egui::Context, done: crate::ocr::Done) {
+        use crate::notice::Notice;
+        use crate::ocr::Done;
+        let text = match done {
+            Done::Text(t) => t,
+            Done::NoLanguage(_) => return ocr_notice(t::NOTICE_OCR_OFF, t::OCR_NO_LANGUAGE),
+            Done::Failed(e) => {
+                log::error(format!("text capture: {e}"));
+                return ocr_notice(t::NOTICE_FAILED, &e);
+            }
+        };
+        if text.trim().is_empty() {
+            return crate::notice::show(Notice::ok(t::NOTICE_NO_TEXT, String::new(), String::new(), None));
+        }
+        if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text.clone())) {
+            log::error(format!("text capture clipboard: {e}"));
+        }
+        let entry = self.db.insert(&text).and_then(|id| self.db.add_revision(id, &text).map(|()| id));
+        let id = match entry {
+            Ok(id) => {
+                self.main.stale = true;
+                Some(id)
+            }
+            Err(e) => {
+                log::error(format!("text capture: {e}"));
+                None
+            }
+        };
+        let first: String = text.lines().next().unwrap_or_default().chars().take(60).collect();
+        let detail = format!(
+            "{} · {} · {}",
+            t::text_copied_detail(text.split_whitespace().count(), text.chars().count()),
+            t::JOURNAL,
+            theme::day_short(chrono::Local::now().date_naive())
+        );
+        crate::notice::show(Notice::ok(t::NOTICE_TEXT_COPIED, first, detail, id));
+        self.flash_tray(ctx);
     }
 
     /// A finished screenshot becomes an image entry in today's journal, like Ctrl+C+C.
@@ -790,6 +837,7 @@ impl App {
         use crate::notice::Notice;
         let s = match o {
             crate::shot::Outcome::Saved(s) => s,
+            crate::shot::Outcome::Text(done) => return self.text_capture_done(ctx, done),
             crate::shot::Outcome::Cancelled => return,
             crate::shot::Outcome::Failed(e) => {
                 log::error(e.clone());
@@ -1048,10 +1096,13 @@ impl eframe::App for App {
             self.stash(ctx);
         }
         if self.sig.shot.swap(false, SeqCst) {
-            self.screenshot(ctx, false);
+            self.screenshot(ctx, crate::shot::Mode::Picture);
         }
         if self.sig.shot_full.swap(false, SeqCst) {
-            self.screenshot(ctx, true);
+            self.screenshot(ctx, crate::shot::Mode::PictureFull);
+        }
+        if self.sig.text_shot.swap(false, SeqCst) {
+            self.screenshot(ctx, crate::shot::Mode::Text);
         }
         let shots = std::mem::take(&mut *self.sig.shots.lock().unwrap_or_else(|e| e.into_inner()));
         for o in shots {

@@ -5,6 +5,9 @@
 //!
 //! Each shot is stored as a PNG in the blob store, copied to `Pictures\OA Screenshots` and put on
 //! the clipboard; the app then files it in today's journal.
+//!
+//! `Ctrl+Alt+T` uses the same overlay to copy *text*: the chosen area is read by the OCR helper
+//! (see ocr.rs) and only the text is kept; the picture is thrown away.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
@@ -12,8 +15,20 @@ use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 /// Folder under Pictures.
 pub const FOLDER: &str = "OA Screenshots";
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    /// Ctrl+Alt+S: the overlay, a picture.
+    Picture,
+    /// Ctrl+Alt+Shift+S: the screen under the pointer, at once.
+    PictureFull,
+    /// Ctrl+Alt+T: the overlay, the text in the chosen area.
+    Text,
+}
+
 pub enum Outcome {
     Saved(Saved),
+    /// Ctrl+Alt+T: what the reader made of the area.
+    Text(crate::ocr::Done),
     Cancelled,
     Failed(String),
 }
@@ -33,14 +48,17 @@ pub struct Saved {
 /// One shot at a time; a second press while the overlay is up is ignored.
 static BUSY: AtomicBool = AtomicBool::new(false);
 
-/// Takes a shot on its own thread and calls `done` there when it is saved, cancelled or failed.
-pub fn start(full: bool, data_dir: PathBuf, done: impl FnOnce(Outcome) + Send + 'static) {
+/// Takes a shot (or reads an area's text) on its own thread and calls `done` there when it is
+/// finished, cancelled or failed. `language` is the OCR language for `Mode::Text`.
+pub fn start(mode: Mode, data_dir: PathBuf, language: String, done: impl FnOnce(Outcome) + Send + 'static) {
     if BUSY.swap(true, SeqCst) {
         return;
     }
     std::thread::spawn(move || {
         let when = chrono::Local::now();
-        let out = match imp::grab(full) {
+        let hint = if mode == Mode::Text { crate::text::TEXT_HINT } else { crate::text::SHOT_HINT };
+        let out = match imp::grab(mode == Mode::PictureFull, hint) {
+            Ok(Some(f)) if mode == Mode::Text => read_text(&data_dir, f, &language),
             Ok(Some(f)) => save(&data_dir, f, when),
             Ok(None) => Outcome::Cancelled,
             Err(e) => Outcome::Failed(format!("screenshot: {e}")),
@@ -48,6 +66,29 @@ pub fn start(full: bool, data_dir: PathBuf, done: impl FnOnce(Outcome) + Send + 
         BUSY.store(false, SeqCst);
         done(out);
     });
+}
+
+/// The area as a temporary PNG for the OCR helper, read, then deleted: only the text is kept.
+fn read_text(data_dir: &Path, f: Frame, language: &str) -> Outcome {
+    let Frame { w, h, mut px } = f;
+    for p in px.chunks_exact_mut(4) {
+        p.swap(0, 2);
+        p[3] = 255;
+    }
+    let dir = data_dir.join("ocr");
+    let path = dir.join(format!("area-{}.png", std::process::id()));
+    let written = std::fs::create_dir_all(&dir).map_err(|e| e.to_string()).and_then(|()| {
+        image::RgbaImage::from_raw(w, h, px)
+            .ok_or_else(|| "invalid image buffer".to_string())?
+            .save_with_format(&path, image::ImageFormat::Png)
+            .map_err(|e| e.to_string())
+    });
+    if let Err(e) = written {
+        return Outcome::Failed(format!("text capture: {e}"));
+    }
+    let done = crate::ocr::read(data_dir, &path, language);
+    let _ = std::fs::remove_file(&path);
+    Outcome::Text(done)
 }
 
 /// Captured pixels, top-down BGRA (as GDI hands them over).
@@ -168,7 +209,7 @@ mod imp {
         }
     }
 
-    pub fn grab(full: bool) -> Result<Option<Frame>, String> {
+    pub fn grab(full: bool, hint_text: &str) -> Result<Option<Frame>, String> {
         // Physical pixels whatever the scaling, on every monitor.
         unsafe {
             let _ = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -178,7 +219,7 @@ mod imp {
         }
         let vs = virtual_screen();
         let frozen = grab_rect(vs)?;
-        let Some(r) = overlay(vs, &frozen)? else { return Ok(None) };
+        let Some(r) = overlay(vs, &frozen, hint_text)? else { return Ok(None) };
         let (x0, y0) = (r.left.clamp(0, frozen.w as i32) as u32, r.top.clamp(0, frozen.h as i32) as u32);
         let (x1, y1) = (r.right.clamp(0, frozen.w as i32) as u32, r.bottom.clamp(0, frozen.h as i32) as u32);
         if x1 <= x0 || y1 <= y0 {
@@ -425,7 +466,7 @@ mod imp {
     }
 
     /// Shows the frozen screen and returns what was chosen (client = virtual-screen coordinates).
-    fn overlay(vs: RECT, frozen: &Frame) -> Result<Option<RECT>, String> {
+    fn overlay(vs: RECT, frozen: &Frame, hint_text: &str) -> Result<Option<RECT>, String> {
         let (w, h) = (frozen.w as i32, frozen.h as i32);
         let origin = POINT { x: vs.left, y: vs.top };
         let whole = RECT { left: 0, top: 0, right: w, bottom: h };
@@ -514,7 +555,7 @@ mod imp {
                 border: (2.0 * scale).round().max(1.0) as i32,
                 _font: Font(font),
             };
-            hint(&ov, rgb(c3(pal.text)), scale);
+            hint(&ov, rgb(c3(pal.text)), scale, hint_text);
             let p = cursor();
             ov.sel = Some(target(&ov, POINT { x: p.x - origin.x, y: p.y - origin.y }));
             OV.with_borrow_mut(|o| *o = Some(ov));
@@ -560,10 +601,10 @@ mod imp {
     }
 
     /// One-line help at the top of the screen under the pointer, baked into the dimmed layer.
-    fn hint(o: &Ov, text: COLORREF, scale: f32) {
+    fn hint(o: &Ov, text: COLORREF, scale: f32, line: &str) {
         let p = cursor();
         let mon = screen_at(o, POINT { x: p.x - o.origin.x, y: p.y - o.origin.y });
-        let s = wide(crate::text::SHOT_HINT);
+        let s = wide(line);
         let pad = (10.0 * scale) as i32;
         let tw = o.char_w * s.len() as i32;
         let x = mon.left + ((mon.right - mon.left) - tw) / 2;
@@ -765,7 +806,7 @@ mod imp {
     pub fn pictures() -> Option<PathBuf> {
         None
     }
-    pub fn grab(_full: bool) -> Result<Option<Frame>, String> {
+    pub fn grab(_full: bool, _hint: &str) -> Result<Option<Frame>, String> {
         Err("screenshots are Windows only".into())
     }
 }

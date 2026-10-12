@@ -214,6 +214,8 @@ pub const NOTICE_CRASHED: &str = "Omniaware closed unexpectedly";
 
 pub const NOTICE_SHOT: &str = "Screenshot";
 pub const SHOT_HINT: &str = "drag an area  ·  click a window  ·  enter: whole screen  ·  esc: cancel";
+pub const TEXT_HINT: &str = "copy text: drag an area  ·  click a window  ·  enter: whole screen  ·  esc: cancel";
+pub const TRAY_TEXT: &str = "Copy text from screen";
 pub const SHOT_NO_FILE: &str = "not in Pictures (see log)";
 
 // ---------- text in images (OCR) ----------
@@ -322,7 +324,7 @@ const SHOT_KEYS: &[Row] = &[
     (&["Enter"], "the screen under the pointer"),
     (&["Esc"], "cancel (or right-click)"),
 ];
-const SHOT_NOTE: &str = "Every shot goes to today's journal, the clipboard and Pictures\\OA Screenshots. The game or app in front keeps focus.";
+const SHOT_NOTE: &str = "Every shot goes to today's journal, the clipboard and Pictures\\OA Screenshots. With the copy-text key the same overlay copies the area's text instead and logs it in the journal. The game or app in front keeps focus.";
 
 const CAPTURE_NOTE: &[Row] = &[
     (&["Esc"], "save and close (empty = nothing saved)"),
@@ -421,9 +423,10 @@ fn global(hk: &crate::config::Hotkeys) -> KeyGroup {
     }
     add(&hk.screenshot, "screenshot: area, window or screen");
     add(&hk.screenshot_full, "screenshot of the screen now");
+    add(&hk.text, "copy the text in an area of the screen");
     list.extend(rows(&[
         (&["Tray", "click"], "quick note"),
-        (&["Tray", "right-click"], "menu: note, main window, screenshot, quit"),
+        (&["Tray", "right-click"], "menu: note, main window, screenshot, copy text, quit"),
         (&["Notice", "click"], "open what was just saved"),
     ]));
     KeyGroup { title: "Global", rows: list, note: Some("Global keys can be changed in config.toml.") }
@@ -472,6 +475,7 @@ mod tests {
         assert!(has(g, &["Ctrl", "Alt", "O"]));
         assert!(has(g, &["Ctrl", "Alt", "S"]));
         assert!(has(g, &["Ctrl", "Alt", "Shift", "S"]));
+        assert!(has(g, &["Ctrl", "Alt", "T"]));
         hk.screenshot_full = String::new();
         hk.screenshot = "ctrl+shift+KeyP".into();
         let g = &shortcut_list(&hk, Place::Capture)[0];
