@@ -82,10 +82,13 @@ pub fn btn_remove_n(n: usize) -> String {
 pub const TIP_CLOSE: &str = "Close (Esc)";
 pub const TIP_COLLAPSE: &str = "Collapse (F1)";
 pub const TIP_SHORTCUTS: &str = "Shortcuts (F1)";
-pub const TIP_F1: &str = "Click or hold F1";
+pub const TIP_F1: &str = "F1 or click: all shortcuts";
 pub const TIP_TILE: &str = "Double-click: enlarge · Ctrl+click: select several · Right-click: menu";
 pub const SHORTCUTS: &str = "Shortcuts";
 pub const SHORTCUTS_TAB: &str = "?  shortcuts · F1";
+pub const SIDEBAR_TAB: &str = "calendar · Ctrl B";
+pub const TIP_SIDEBAR_SHOW: &str = "Show the calendar column (Ctrl+B)";
+pub const TIP_SIDEBAR_HIDE: &str = "Hide the calendar column (Ctrl+B)";
 pub const SEARCH_HINT: &str = "Search everything…";
 pub const SEARCH_HELP: &str = "words match inside words · * ? wildcards · /regex/ · text in images too";
 pub const TIP_TO_BIN: &str = "Moves them to the bin";
@@ -205,6 +208,7 @@ pub const NOTICE_CAPTURED: &str = "Captured silently";
 pub const NOTICE_ALREADY: &str = "Already captured";
 pub const NOTICE_FAILED: &str = "Couldn't save";
 pub const NOTICE_SEE_LOG: &str = "see omniaware.log";
+pub const NOTICE_CRASHED: &str = "Omniaware closed unexpectedly";
 
 // ---------- screenshots ----------
 
@@ -327,7 +331,7 @@ const CAPTURE_NOTE: &[Row] = &[
     (&["Ctrl", "Shift", "S"], "save the text as a file"),
     (&["Ctrl", "V"], "paste text or an image"),
     (&["Ctrl", "Click"], "open a link"),
-    (&["F1"], "all shortcuts (hold or click)"),
+    (&["F1"], "all shortcuts; F1, Esc, any key or a click closes, ↑ ↓ scroll"),
 ];
 const NAMING_CAPTURE: &[Row] = &[
     (&["F2"], "name the entry (a reusable snippet)"),
@@ -397,6 +401,7 @@ const SEARCH_KEYS: &[Row] = &[
 const SEARCH_NOTE: &str = "Words match inside words (affe finds Kaffekannor). * and ? are wildcards, /…/ is a regular expression. Text in pictures and screenshots is found too.";
 const WINDOW_KEYS: &[Row] = &[
     (&["F1"], "show / hide this panel"),
+    (&["Ctrl", "B"], "show / hide the calendar column"),
     (&["Ctrl", "Shift", "T"], "next theme"),
     (&["Esc"], "back, then timeline, then close"),
 ];

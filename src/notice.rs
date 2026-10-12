@@ -63,7 +63,7 @@ mod imp {
     use windows::Win32::Graphics::Gdi::{
         AddFontMemResourceEx, BeginPaint, BitBlt, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateCompatibleBitmap,
         CreateCompatibleDC, CreateFontW, CreateSolidBrush, DEFAULT_CHARSET, DT_END_ELLIPSIS, DT_NOPREFIX, DT_RIGHT,
-        DT_SINGLELINE, DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect, FrameRect, GetTextExtentPoint32W, HDC,
+        DRAW_TEXT_FORMAT, DT_SINGLELINE, DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect, FrameRect, GetTextExtentPoint32W, HDC,
         HFONT, InvalidateRect, OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, SelectObject, SetBkMode, SetTextColor,
         TRANSPARENT, TextOutW,
     };
@@ -134,6 +134,19 @@ mod imp {
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().collect()
+    }
+
+    /// `DrawTextW` with an empty slice hands Windows Rust's dangling empty-buffer pointer, which
+    /// user32 dereferences even when the length is 0 (an access violation inside WM_PAINT).
+    /// Empty strings are simply not drawn.
+    unsafe fn draw_text(dc: HDC, s: &str, rc: &mut RECT, f: DRAW_TEXT_FORMAT) {
+        if s.is_empty() {
+            return;
+        }
+        let mut w = wide(s);
+        unsafe {
+            DrawTextW(dc, &mut w, rc, f);
+        }
     }
 
     pub fn init(on_click: impl Fn(i64) + Send + Sync + 'static) {
@@ -442,22 +455,19 @@ mod imp {
             let hint = if n.entry.is_some() { "open ↗" } else if n.kind == Kind::Error { "dismiss" } else { "" };
             SelectObject(dc, small.into());
             SetTextColor(dc, rgb(c(pal.faint)));
-            let mut hint_w = wide(hint);
             let mut hr = RECT { left: rc.left, top: y1 + px(1.0), right: rc.right - px(12.0), bottom: y1 + px(20.0) };
-            DrawTextW(dc, &mut hint_w, &mut hr, DT_RIGHT | DT_SINGLELINE | DT_NOPREFIX);
+            draw_text(dc, hint, &mut hr, DT_RIGHT | DT_SINGLELINE | DT_NOPREFIX);
             if !n.context.is_empty() {
                 SelectObject(dc, regular.into());
                 SetTextColor(dc, rgb(c(pal.weak)));
-                let mut ctx = wide(&format!(" · {}", n.context));
                 let mut cr = RECT { left: x0 + sz.cx, top: y1 + px(1.0), right: rc.right - px(64.0), bottom: y1 + px(20.0) };
-                DrawTextW(dc, &mut ctx, &mut cr, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                draw_text(dc, &format!(" · {}", n.context), &mut cr, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             }
             // line 2: details
             SelectObject(dc, small.into());
             SetTextColor(dc, rgb(c(pal.soft)));
-            let mut d = wide(&n.detail);
             let mut dr = RECT { left: x0, top: px(36.0), right: rc.right - px(12.0), bottom: rc.bottom - px(6.0) };
-            DrawTextW(dc, &mut d, &mut dr, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            draw_text(dc, &n.detail, &mut dr, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
         }
     }
 }

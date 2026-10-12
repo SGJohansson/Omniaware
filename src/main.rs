@@ -44,6 +44,7 @@ fn main() {
         return;
     }
     log::init(&dir);
+    log::install_crash_handlers();
     send::clean_spool(&dir);
     let cfg = config::load(&dir);
 

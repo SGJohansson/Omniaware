@@ -575,7 +575,9 @@ mod imp {
             let _ = DeleteObject(b.into());
             SetBkMode(o.dim.dc, TRANSPARENT);
             SetTextColor(o.dim.dc, text);
-            let _ = TextOutW(o.dim.dc, x, y, &s);
+            if !s.is_empty() {
+                let _ = TextOutW(o.dim.dc, x, y, &s);
+            }
         }
     }
 
@@ -719,7 +721,9 @@ mod imp {
                     SetBkMode(o.back.dc, TRANSPARENT);
                     SetTextColor(o.back.dc, o.accent);
                     let pad = o.char_w / 2 + 2;
-                    let _ = TextOutW(o.back.dc, lr.left + pad, lr.top + pad / 2, &t);
+                    if !t.is_empty() {
+                        let _ = TextOutW(o.back.dc, lr.left + pad, lr.top + pad / 2, &t);
+                    }
                 }
                 blt(dc, c, o.back.dc);
             });

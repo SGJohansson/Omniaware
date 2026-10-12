@@ -430,6 +430,9 @@ impl App {
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F1)) {
             self.toggle_shortcuts();
         }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::B)) {
+            self.toggle_sidebar();
+        }
         if self.main.editor.is_none() && self.main.view == View::Timeline && nothing_focused {
             let (l, r, t) = ctx.input(|i| (i.key_pressed(Key::ArrowLeft), i.key_pressed(Key::ArrowRight), i.key_pressed(Key::T)));
             if l {
@@ -466,6 +469,11 @@ impl App {
 
     fn toggle_shortcuts(&mut self) {
         self.cfg.window.shortcuts = !self.cfg.window.shortcuts;
+        crate::config::save(&self.dir, &self.cfg);
+    }
+
+    fn toggle_sidebar(&mut self) {
+        self.cfg.window.sidebar = !self.cfg.window.sidebar;
         crate::config::save(&self.dir, &self.cfg);
     }
 
@@ -523,6 +531,8 @@ impl App {
         let mut close = false;
         let mut new = false;
         let mut cycle = false;
+        let mut search = false;
+        let searching = self.main.view == View::Search && self.main.editor.is_none();
         let theme_name = self.theme.name();
         egui::Panel::top("m_top")
             .frame(egui::Frame::new().fill(theme::p().bg_side).inner_margin(Margin { left: 14, right: 12, top: 11, bottom: 10 }))
@@ -530,16 +540,22 @@ impl App {
                 if ui.interact(ui.max_rect(), Id::new("m_drag"), Sense::drag()).drag_started() {
                     ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
                 }
+                let bar = ui.max_rect();
+                // Where the left group ends and the right group starts: the search field goes between.
+                let (mut left_end, mut right_start, mut row) = (bar.left(), bar.right(), bar.center().y);
                 ui.horizontal(|ui| {
-                        // Wordmark: bold name, version right after it (baseline-aligned), then the section.
+                        // Wordmark: "OA", the full name small beside it (until "OA" is the name people
+                        // know), version, then the section.
                         ui.spacing_mut().item_spacing.x = 7.0;
-                        ui.label(RichText::new("Omniaware").family(crate::markup::bold_family()).size(19.0).color(theme::p().accent));
+                        let mark = theme::oa_mark(ui, 25.0, theme::p().bg_side);
+                        row = mark.rect.center().y;
                         ui.with_layout(Layout::left_to_right(Align::Max), |ui| {
                             ui.spacing_mut().item_spacing.x = 7.0;
-                            ui.add_space(-2.0);
+                            ui.add_space(-1.0);
+                            ui.label(RichText::new("Omniaware").family(theme::medium()).size(13.0).color(theme::p().weak));
                             ui.label(RichText::new(concat!("v", env!("CARGO_PKG_VERSION"))).size(11.5).color(theme::p().faint));
                             ui.add_space(10.0);
-                            ui.label(RichText::new(format!("/  {section}")).color(theme::p().weak));
+                            left_end = ui.label(RichText::new(format!("/  {section}")).color(theme::p().weak)).rect.right();
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 close = ui.add(egui::Button::new("✕").frame(false)).on_hover_text(t::TIP_CLOSE).clicked();
                                 ui.add_space(6.0);
@@ -552,12 +568,31 @@ impl App {
                                     theme::open_url(theme::SITE_URL);
                                 }
                                 ui.add_space(10.0);
-                                cycle = theme::quiet_button(ui, theme_name).on_hover_text(t::TIP_THEME).clicked();
+                                let b = theme::quiet_button(ui, theme_name).on_hover_text(t::TIP_THEME);
+                                cycle = b.clicked();
+                                right_start = b.rect.left();
                             });
                         });
                     })
 ;
+                // Search, centred in the bar when there is room for it.
+                let gap = (left_end + 16.0, right_start - 16.0);
+                let w = 220f32.min(gap.1 - gap.0);
+                if w >= 120.0 {
+                    let x = (bar.center().x - w / 2.0).clamp(gap.0, gap.1 - w);
+                    let rect = egui::Rect::from_min_size(egui::pos2(x, row - 14.0), egui::vec2(w, 28.0));
+                    let resp = ui.interact(rect, Id::new("m_search_pill"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                    let p = ui.painter();
+                    let stroke = if searching || resp.hovered() { theme::p().accent_dim } else { theme::p().line };
+                    p.rect(rect, 5.0, theme::p().bg_field, egui::Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
+                    p.text(rect.left_center() + egui::vec2(10.0, 0.0), Align2::LEFT_CENTER, t::SEARCH, FontId::monospace(13.0), theme::p().weak);
+                    p.text(rect.right_center() - egui::vec2(10.0, 0.0), Align2::RIGHT_CENTER, "Ctrl K", FontId::monospace(11.0), theme::p().weak);
+                    search = resp.clicked();
+                }
             });
+        if search {
+            self.set_view(View::Search);
+        }
         if cycle {
             let ctx = ui.ctx().clone();
             self.cycle_theme(&ctx);
@@ -576,21 +611,41 @@ impl App {
         let mut pick_day: Option<NaiveDate> = None;
         let mut month_step = 0i32;
         let today = Local::now().date_naive();
+        // Folded away (Ctrl+B or the arrow): a slim strip like the shortcut panel's, which opens it.
+        if !self.cfg.window.sidebar {
+            let mut open = false;
+            egui::Panel::left("m_side")
+                .resizable(false)
+                .exact_size(26.0)
+                .frame(egui::Frame::new().fill(theme::p().bg_side).inner_margin(Margin::symmetric(0, 10)))
+                .show(ui, |ui| {
+                    let rect = ui.max_rect();
+                    let resp = ui.interact(rect, Id::new("side_tab"), Sense::click()).on_hover_text(t::TIP_SIDEBAR_SHOW);
+                    if resp.hovered() {
+                        ui.painter().rect_filled(rect, 0.0, theme::p().tint);
+                    }
+                    let g = ui.painter().layout_no_wrap(t::SIDEBAR_TAB.into(), FontId::monospace(11.5), theme::p().weak);
+                    let pos = egui::pos2(rect.center().x - g.size().y / 2.0, rect.top() + 16.0 + g.size().x);
+                    ui.painter().add(egui::epaint::TextShape::new(pos, g, theme::p().weak).with_angle(-std::f32::consts::FRAC_PI_2));
+                    open = resp.clicked();
+                });
+            if open {
+                self.toggle_sidebar();
+            }
+            return;
+        }
+        let mut fold = false;
         egui::Panel::left("m_side")
             .resizable(false)
             .exact_size(214.0)
             .frame(egui::Frame::new().fill(theme::p().bg_side).inner_margin(Margin::symmetric(10, 10)))
             .show(ui, |ui| {
-                // search pill
-                let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
-                let p = ui.painter_at(rect);
-                p.rect(rect, 5.0, theme::p().bg_field, egui::Stroke::new(1.0, theme::p().line), egui::StrokeKind::Inside);
-                p.text(rect.left_center() + egui::vec2(10.0, 0.0), Align2::LEFT_CENTER, t::SEARCH, FontId::monospace(13.0), theme::p().weak);
-                p.text(rect.right_center() - egui::vec2(10.0, 0.0), Align2::RIGHT_CENTER, "Ctrl K", FontId::monospace(11.0), theme::p().weak);
-                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                    goto = Some(View::Search);
-                }
-                ui.add_space(10.0);
+                // Fold control at the outer edge, like the shortcut panel's "F1 ›".
+                ui.horizontal(|ui| {
+                    fold = ui.add(egui::Button::new("‹").frame(false)).on_hover_text(t::TIP_SIDEBAR_HIDE).clicked();
+                    ui.label(RichText::new("Ctrl B").color(theme::p().weak).size(11.5));
+                });
+                ui.add_space(4.0);
 
                 let cur = if self.main.editor.is_some() { None } else { Some(self.main.view) };
                 for (v, label) in [(View::Timeline, t::NAV_TIMELINE), (View::Named, t::NAV_NAMED), (View::Trash, t::NAV_BIN)] {
@@ -671,6 +726,9 @@ impl App {
                     pick_day = Some(today);
                 }
             });
+        if fold {
+            self.toggle_sidebar();
+        }
         if month_step != 0 {
             let m = self.main.month;
             self.main.month = if month_step < 0 {

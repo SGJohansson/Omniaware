@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 use tray_icon::menu::MenuEvent;
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
 
-pub const TITLE: &str = "Omniaware";
+/// Window title and tray tooltip: the short name first while "OA" settles in.
+pub const TITLE: &str = "OA · Omniaware";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -104,7 +105,7 @@ pub struct App {
     /// Pasted picture already in the entry: (blob, #n) waiting for "add copy?".
     pub(crate) dup_prompt: Option<(String, usize)>,
     /// Shortcut overlay in the capture popup ("?" button / hold F1).
-    pub(crate) capture_help: bool,
+    pub(crate) capture_help: crate::capture::Help,
     pub(crate) theme: theme::ThemeChoice,
     /// The "send to" dialog, when open.
     pub(crate) send_dlg: Option<crate::send_ui::SendDlg>,
@@ -200,6 +201,10 @@ impl App {
                 c.request_repaint();
             });
         }
+        // The previous run crashed: say so once, with the reason (also in omniaware.log).
+        if let Some(why) = log::take_crash() {
+            ocr_notice(t::NOTICE_CRASHED, &why);
+        }
 
         let tray = match if cfg!(windows) { tray::build() } else { Err("tray: Windows only".into()) } {
             Ok(t) => {
@@ -272,7 +277,7 @@ impl App {
             md_cache: Default::default(),
             lightbox: None,
             dup_prompt: None,
-            capture_help: false,
+            capture_help: Default::default(),
             theme: theme_choice,
             send_dlg: None,
             send_hint: None,
@@ -399,6 +404,7 @@ impl App {
         }
         self.capture = Some(self.new_capture_doc());
         self.capture_naming = false;
+        self.capture_help = Default::default();
         self.mode = Mode::Capture;
         self.show(ctx, true);
     }

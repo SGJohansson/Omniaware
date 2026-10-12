@@ -210,6 +210,32 @@ pub fn medium() -> FontFamily {
     FontFamily::Name("medium".into())
 }
 
+/// JetBrains Mono ExtraBold, for the "OA" mark only.
+fn mark_family() -> FontFamily {
+    FontFamily::Name("mark".into())
+}
+
+/// The "OA" mark: ExtraBold in the theme's accent, a 1 px ring in the background colour that
+/// lifts it off its own shadow, and a hard drop shadow (VoidFlow's crimson edge colour there,
+/// a translucent accent elsewhere). `bg` is what it sits on.
+pub fn oa_mark(ui: &mut Ui, size: f32, bg: Color32) -> egui::Response {
+    let pal = p();
+    let galley = ui.painter().layout_no_wrap("OA".into(), egui::FontId::new(size, mark_family()), pal.accent);
+    let k = (size / 22.0).max(0.6);
+    let shadow_at = egui::vec2(2.0, 2.0) * k;
+    // The shadow hangs below the allocated space, so text beside the mark shares its baseline.
+    let (rect, resp) = ui.allocate_exact_size(galley.size() + egui::vec2(shadow_at.x + 2.0, 0.0), egui::Sense::hover());
+    let pos = rect.min + egui::vec2(1.0, 0.0);
+    let painter = ui.painter();
+    let shadow = pal.edge.unwrap_or(pal.accent.gamma_multiply(0.45));
+    painter.galley_with_override_text_color(pos + shadow_at, galley.clone(), shadow);
+    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-1.0, -1.0), (1.0, 1.0), (-1.0, 1.0), (1.0, -1.0)] {
+        painter.galley_with_override_text_color(pos + egui::vec2(dx, dy) * k, galley.clone(), bg);
+    }
+    painter.galley(pos, galley, pal.accent);
+    resp
+}
+
 pub fn install(ctx: &egui::Context, size: f32) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
@@ -224,12 +250,17 @@ pub fn install(ctx: &egui::Context, size: f32) {
         "jbm-medium".into(),
         Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/JetBrainsMono-Medium.ttf"))),
     );
+    fonts.font_data.insert(
+        "jbm-extrabold".into(),
+        Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/JetBrainsMono-ExtraBold.ttf"))),
+    );
     for fam in [FontFamily::Proportional, FontFamily::Monospace] {
         fonts.families.entry(fam).or_default().insert(0, "jbm".into());
     }
     let fallback = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     fonts.families.insert(medium(), std::iter::once("jbm-medium".to_string()).chain(fallback.clone()).collect());
-    fonts.families.insert(crate::markup::bold_family(), std::iter::once("jbm-bold".to_string()).chain(fallback).collect());
+    fonts.families.insert(crate::markup::bold_family(), std::iter::once("jbm-bold".to_string()).chain(fallback.clone()).collect());
+    fonts.families.insert(mark_family(), std::iter::once("jbm-extrabold".to_string()).chain(fallback).collect());
     ctx.set_fonts(fonts);
 
     set_visuals(ctx, p());

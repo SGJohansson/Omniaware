@@ -71,6 +71,8 @@ pub struct WindowCfg {
     pub main_height: f32,
     /// Shortcut side panel open in the main window.
     pub shortcuts: bool,
+    /// Left column (views, calendar) shown in the main window; Ctrl+B toggles.
+    pub sidebar: bool,
 }
 
 impl Default for Config {
@@ -99,7 +101,7 @@ impl Default for Hotkeys {
 }
 impl Default for WindowCfg {
     fn default() -> Self {
-        Self { width: 640.0, height: 420.0, font_size: 14.0, main_width: 1040.0, main_height: 700.0, shortcuts: false }
+        Self { width: 640.0, height: 420.0, font_size: 14.0, main_width: 1040.0, main_height: 700.0, shortcuts: false, sidebar: true }
     }
 }
 

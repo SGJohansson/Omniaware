@@ -1,4 +1,4 @@
-# Omniaware
+# OA · Omniaware
 
 A lightweight, keyboard-first home for everything I don't want to lose: clipboard snippets, quick notes, links, screenshots and journal entries — captured in a keystroke and laid out on a timeline.
 
@@ -45,7 +45,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 
 ## Keyboard shortcuts
 
-Everything below is also in the app: press **`F1`** in the capture popup (hold or click) or in the main window (toggles a side panel). The global keys at the top are read from `config.toml`, so if you change one, `F1` shows your key.
+Everything below is also in the app: press **`F1`** in the capture popup (an overlay) or in the main window (a side panel). The global keys at the top are read from `config.toml`, so if you change one, `F1` shows your key.
 
 **Global** — work anywhere in Windows
 
@@ -82,7 +82,7 @@ Every shot goes to today's journal, the clipboard and `Pictures\OA Screenshots`.
 | `Ctrl+V` | Paste text or an image |
 | `Ctrl`+click | Open a link |
 | `Ctrl+Alt+O` | Keep the note and expand to the main window |
-| `F1` (hold or click) | All shortcuts; the most common ones are always listed along the bottom |
+| `F1` (or click it in the footer) | All shortcuts. `↑` `↓` `PgUp` `PgDn` `Home` `End` scroll; `F1`, `Esc`, any other key or a click closes it. The most common ones are always listed along the bottom |
 
 **Naming** (quick note and main window)
 
@@ -120,6 +120,7 @@ If the name is already taken, press `Enter` again to move it here; the other ent
 | `Ctrl+E` | Edit / preview |
 | `Ctrl+V` · `Ctrl`+click | Paste text or an image · open a link |
 | `F1` | Show or hide the shortcut panel |
+| `Ctrl+B` | Show or hide the left column (views and calendar); the choice is remembered |
 | `Ctrl+Shift+T` | Next theme: dark → light → system → voidflow (also in the quick note) |
 | `Esc` | Back; on the timeline, close the window |
 

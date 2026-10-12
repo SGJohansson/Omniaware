@@ -3,7 +3,23 @@
 use crate::app::App;
 use crate::text as t;
 use crate::theme::{self, KeyItem};
-use egui::{Align, Id, Key, Layout, Margin, Modifiers, RichText, Sense, TextEdit, ViewportCommand};
+use egui::{Align, Event, Id, Key, Layout, Margin, Modifiers, RichText, Sense, TextEdit, ViewportCommand};
+use std::time::{Duration, Instant};
+
+/// Presses that would close the shortcut overlay this soon after it opened are ignored, so a
+/// quick double tap on F1 does not open and close it in one go.
+const HELP_GRACE: Duration = Duration::from_millis(350);
+
+/// The F1 overlay in the capture popup: open or not, and where it is scrolled.
+#[derive(Default)]
+pub(crate) struct Help {
+    pub open: bool,
+    opened: Option<Instant>,
+    offset: f32,
+    max: f32,
+    page: f32,
+    scroll_to: Option<f32>,
+}
 
 enum Action {
     None,
@@ -34,6 +50,53 @@ enum Foot {
     Help,
 }
 
+/// F1 opens the overlay. While it is open it owns the keyboard: ↑ ↓ PgUp PgDn Home End scroll it
+/// (the mouse wheel too), and F1, Esc, any other key or a click close it, once `HELP_GRACE` has
+/// passed. Returns whether it was open this frame (its keys are then used up).
+fn help_keys(h: &mut Help, ctx: &egui::Context) -> bool {
+    if !h.open {
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F1)) {
+            *h = Help { open: true, opened: Some(Instant::now()), scroll_to: Some(0.0), ..Default::default() };
+            return true;
+        }
+        return false;
+    }
+    let settled = h.opened.is_none_or(|t| t.elapsed() >= HELP_GRACE);
+    let (line, page) = (40.0, (h.page - 40.0).max(40.0));
+    let (mut close, mut delta, mut to) = (false, 0.0f32, None);
+    ctx.input_mut(|i| {
+        for e in &i.events {
+            match e {
+                Event::Key { key, pressed: true, .. } => match key {
+                    Key::ArrowDown => delta += line,
+                    Key::ArrowUp => delta -= line,
+                    Key::PageDown => delta += page,
+                    Key::PageUp => delta -= page,
+                    Key::Home => to = Some(0.0),
+                    Key::End => to = Some(f32::MAX),
+                    _ => close = true,
+                },
+                Event::Text(_) | Event::Paste(_) => close = true,
+                Event::PointerButton { pressed: true, .. } => close = true,
+                _ => {}
+            }
+        }
+        // Nothing typed while the overlay is up reaches the note underneath.
+        i.events.retain(|e| !matches!(e, Event::Key { .. } | Event::Text(_) | Event::Paste(_) | Event::Copy | Event::Cut));
+    });
+    if close && settled {
+        h.open = false;
+    } else if let Some(y) = to {
+        h.scroll_to = Some(y);
+    } else if delta != 0.0 {
+        h.scroll_to = Some(h.offset + delta);
+    }
+    if close && !settled || delta != 0.0 || to.is_some() {
+        ctx.request_repaint();
+    }
+    true
+}
+
 fn bar(fill: egui::Color32, x: i8, y: i8) -> egui::Frame {
     egui::Frame::new().fill(fill).inner_margin(Margin::symmetric(x, y))
 }
@@ -46,13 +109,15 @@ impl App {
             return;
         }
 
-        // ---- keys (the lightbox owns Esc while it is open) ----
+        // ---- keys (the lightbox owns Esc while it is open; the F1 overlay owns every key) ----
         let modal = self.lightbox.is_some() || self.dup_prompt.is_some() || self.send_dlg.is_some();
         let mut action = Action::None;
         let mut save_as = false;
-        let esc_used = self.selection_keys(&ctx);
+        let help_was_open = self.capture_help.open;
+        let help = !modal && help_keys(&mut self.capture_help, &ctx);
+        let esc_used = !help && self.selection_keys(&ctx);
         let (esc, shift) = ctx.input(|i| (i.key_pressed(Key::Escape), i.modifiers.shift));
-        if modal || esc_used {
+        if modal || esc_used || help {
         } else if esc {
             if self.capture_naming {
                 self.capture_naming = false;
@@ -77,7 +142,7 @@ impl App {
         if save_as {
             self.save_doc_as();
         }
-        if !modal && !self.capture_naming {
+        if !modal && !help && !self.capture_naming {
             self.send_keys(&ctx);
         }
         match action {
@@ -88,7 +153,7 @@ impl App {
 
         let send_label = self.send_label();
         let naming = self.capture_naming;
-        let show_help = self.capture_help || ctx.input(|i| i.key_down(Key::F1));
+        let show_help = self.capture_help.open;
         let keys = if show_help { t::shortcut_list(&self.cfg.hotkeys, t::Place::Capture) } else { Vec::new() };
         let mut foot: Option<Foot> = None;
         let dir = self.dir.clone();
@@ -104,6 +169,7 @@ impl App {
                 ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
             }
             ui.horizontal(|ui| {
+                    theme::oa_mark(ui, 15.0, theme::p().bg);
                     ui.label(RichText::new(t::QUICK_NOTE).family(theme::medium()));
                     let dest = match (&doc.saved_name, naming) {
                         (Some(n), _) => t::dest_named(Some(n)),
@@ -199,7 +265,11 @@ impl App {
                             let room = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
                             let w = room.x.clamp(260.0, 600.0);
                             ui.set_width(w);
-                            egui::ScrollArea::vertical().max_height(room.y.max(120.0)).auto_shrink([false, true]).show(ui, |ui| {
+                            let mut area = egui::ScrollArea::vertical().max_height(room.y.max(120.0)).auto_shrink([false, true]);
+                            if let Some(y) = self.capture_help.scroll_to.take() {
+                                area = area.vertical_scroll_offset(y.clamp(0.0, self.capture_help.max));
+                            }
+                            let out = area.show(ui, |ui| {
                                 if w >= 480.0 {
                                     // Two columns, split where the rows are about even.
                                     let half = keys.iter().map(|g| g.rows.len() + 2).sum::<usize>() / 2;
@@ -221,11 +291,19 @@ impl App {
                                     theme::status_legend(ui);
                                 }
                             });
+                            let h = &mut self.capture_help;
+                            h.offset = out.state.offset.y;
+                            h.page = out.inner_rect.height();
+                            h.max = (out.content_size.y - h.page).max(0.0);
                         });
                 });
         }
         match foot {
-            Some(Foot::Help) => self.capture_help = !self.capture_help,
+            // A click closes an open overlay (see help_keys); the footer item only opens it.
+            Some(Foot::Help) if !help_was_open => {
+                self.capture_help = Help { open: true, opened: Some(Instant::now()), ..Default::default() };
+            }
+            Some(Foot::Help) => {}
             Some(Foot::Save) => return self.finish_capture(&ctx, false),
             Some(Foot::Expand) => return self.open_main(&ctx),
             Some(Foot::Name) => {
