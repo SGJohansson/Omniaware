@@ -5,6 +5,8 @@ A lightweight, keyboard-first home for everything I don't want to lose: clipboar
 I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markdown editor and browser-based note tools. The goals are simple: it should be there the instant I need it, stay out of the way when I don't, and never lose a single character — not even on a power cut.
 
 > **Status:** early development (v0.8). Windows 10/11 only. The interface is in British English.
+>
+> **Forgot a shortcut?** Press `F1` anywhere in Omniaware for the full list, or see [Keyboard shortcuts](#keyboard-shortcuts).
 
 ![Omniaware main window: timeline, calendar and named entries](assets/screenshots/main-window.png)
 
@@ -42,51 +44,115 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 
 ## Keyboard shortcuts
 
-**Global**
+Everything below is also in the app: press **`F1`** in the capture popup (hold or click) or in the main window (toggles a side panel). The global keys at the top are read from `config.toml`, so if you change one, `F1` shows your key.
+
+**Global** — work anywhere in Windows
 
 | Shortcut | Action |
 |---|---|
 | `Ctrl+C` `C` | Save the clipboard silently (hold `Ctrl`, tap `C` twice) |
-| `Ctrl+Alt+O` (or `AltGr+O`) | 1st press: capture popup · 2nd: expand to the main window · 3rd: close |
-| `Ctrl+Alt+S` | Screenshot: drag an area, click a window or the desktop, `Enter` for the whole screen, `Esc` to cancel |
-| `Ctrl+Alt+Shift+S` | Screenshot of the screen under the pointer, at once |
-| Tray icon click | Capture popup |
-| `Ctrl+Shift+T` (in Omniaware) | Next theme: dark → light → system → voidflow |
+| `Ctrl+Alt+O` (or `AltGr+O`) | 1st press: quick note · 2nd: expand to the main window · 3rd: close |
+| `Ctrl+Alt+S` | Screenshot: area, window or whole screen (see below) |
+| `Ctrl+Alt+Shift+S` | Screenshot of the screen under the pointer, at once, nothing shown |
+| Tray icon click | Quick note |
+| Tray icon right-click | Menu: quick note, open Omniaware, screenshot, quit |
+| Click a notice | Open what was just saved (hover keeps the notice) |
 
-**Capture popup**
+**Screenshot overlay** (`Ctrl+Alt+S`)
 
 | Shortcut | Action |
 |---|---|
-| `Esc` | Save and close (empty entries are discarded) |
-| `Ctrl+Alt+O` | Keep the note and expand to the main window |
-| `Ctrl+Enter` | Send to the suggested shell or Explorer (asks first) |
-| `Ctrl+Shift+Enter` | Send to… (choose; `1`–`5`, `A` as administrator) |
-| `Shift+Esc` | Move to the recycle bin |
+| Drag | Take an area |
+| Click | Take the window under the pointer |
+| Click on the desktop | Take that whole screen |
+| `Enter` | Take the screen under the pointer |
+| `Esc` or right-click | Cancel |
+
+Every shot goes to today's journal, the clipboard and `Pictures\OA Screenshots`. The game or app in front keeps focus throughout.
+
+**Quick note** (the capture popup)
+
+| Shortcut | Action |
+|---|---|
+| `Esc` | Save and close (an empty note saves nothing) |
+| `Shift+Esc` | Discard (moves it to the bin) |
 | `Ctrl+S` | Save a version now |
 | `Ctrl+Shift+S` | Save the text as a file |
-| `F2` | Name the entry. `Enter` / `Tab` back to the text, `Ctrl+Enter` name and close. If the name is taken, `Enter` again moves it here; the previous entry is kept, unnamed |
-| `F1` (hold or click) | Show all shortcuts; the most common ones are always listed along the bottom |
 | `Ctrl+V` | Paste text or an image |
 | `Ctrl`+click | Open a link |
+| `Ctrl+Alt+O` | Keep the note and expand to the main window |
+| `F1` (hold or click) | All shortcuts; the most common ones are always listed along the bottom |
+
+**Naming** (quick note and main window)
+
+| Shortcut | Action |
+|---|---|
+| `F2` | Name the entry; a named entry is a reusable snippet |
+| `Enter` / `Tab` | Keep the name and go back to the text (a click elsewhere does the same) |
+| `Ctrl+Enter` | Keep the name and close (quick note) |
+| `Esc` | Cancel naming (quick note) |
+
+If the name is already taken, press `Enter` again to move it here; the other entry keeps its text, unnamed.
+
+**Send to a shell** (quick note and an open entry)
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+Enter` | Send to the suggestion shown in the footer (`→ PowerShell`, `→ WSL`, …) |
+| `Ctrl+Shift+Enter` | Choose where to send |
+| `1`–`5` | Pick and send: PowerShell, WSL, cmd, Explorer, previous window |
+| `↑` `↓` · `Enter` | Move · send |
+| `A` | As administrator (one UAC prompt) |
+| `D` | Don't ask again for this target |
+| `Esc` | Cancel |
 
 **Main window**
 
 | Shortcut | Action |
 |---|---|
 | `←` `→` / `T` | Previous / next day / today |
-| `Ctrl+K` | Search. `Enter` opens, `Shift+Enter` pastes into the previous window |
+| Click a day in the calendar | Go to that day |
 | `Ctrl+N` | New entry |
-| `Ctrl+E` | Toggle edit / preview |
-| `Ctrl+Enter` / `Ctrl+Shift+Enter` | Send the open entry to a shell or Explorer / choose where |
-| `Ctrl`+click | Open a link |
-| `Ctrl+S` / `F2` | Save a version / name the entry |
-| `Ctrl+Shift+S` | Save the open entry as a file, or export the selected entries as one file |
-| `Ctrl`+click / `Shift`+click | Select entries / a range |
-| `Ctrl+A` · `Delete` | Select the whole list · move the selection to the bin |
+| `Ctrl+K` | Search |
+| `Ctrl+S` | Save a version of the open entry now |
+| `Ctrl+Shift+S` | Save the open entry as a file |
+| `Ctrl+E` | Edit / preview |
+| `Ctrl+V` · `Ctrl`+click | Paste text or an image · open a link |
 | `F1` | Show or hide the shortcut panel |
-| `Esc` | Back, then close |
+| `Ctrl+Shift+T` | Next theme: dark → light → system → voidflow (also in the quick note) |
+| `Esc` | Back; on the timeline, close the window |
 
-Shortcuts can be changed in `config.toml`.
+**Lists** (timeline, named, bin, search results)
+
+| Shortcut | Action |
+|---|---|
+| Click | Open |
+| `Ctrl`+click / `Shift`+click | Select an entry / a range |
+| `Ctrl+Shift`+click | Add a range |
+| `Ctrl+A` | Select the whole list on screen |
+| `Ctrl+Shift+S` | Export the selection as one plain-text file |
+| `Delete` | Move to the bin; in the bin, delete forever (press twice) |
+| `Esc` | Clear the selection |
+
+**Search** (`Ctrl+K`)
+
+| Shortcut | Action |
+|---|---|
+| `↑` `↓` | Select a result |
+| `Enter` | Open |
+| `Shift+Enter` | Paste into the window you came from |
+
+Words match anywhere inside words (`affe` finds *Kaffekannor*), `*` and `?` are wildcards, and `/…/` is a full regular expression.
+
+**Images** (in any entry)
+
+| Shortcut | Action |
+|---|---|
+| Click / `Ctrl`+click | Select / select several |
+| Double-click | Enlarge |
+| Right-click | Copy, save as, open with, show in folder, remove |
+| `Delete` | Remove the selected |
+| `Esc` | Deselect, or close the enlarged view |
 
 ## Installation
 

@@ -488,7 +488,7 @@ impl App {
                     });
                     ui.add_space(8.0);
                     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                        theme::shortcut_groups(ui, t::MAIN_KEYS);
+                        theme::shortcut_groups(ui, &t::shortcut_list(&self.cfg.hotkeys, t::Place::Main));
                         theme::status_legend(ui);
                     });
                 } else {
@@ -887,7 +887,12 @@ impl App {
         }
         if self.main.items.is_empty() {
             let caps = theme::hotkey_caps(&self.cfg.hotkeys.capture).join("+");
-            empty_note(ui, &t::empty_day(&caps));
+            let shot = if self.cfg.hotkeys.screenshot.trim().is_empty() {
+                String::new()
+            } else {
+                theme::hotkey_caps(&self.cfg.hotkeys.screenshot).join("+")
+            };
+            empty_note(ui, &t::empty_day(&caps, &shot));
             return;
         }
         let mut click = None;

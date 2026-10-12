@@ -253,84 +253,220 @@ pub fn day_meta(entries: usize, events: usize) -> String {
     s
 }
 
-pub fn empty_day(caps: &str) -> String {
-    format!("Nothing here yet. Ctrl+C+C saves the clipboard instantly, {caps} opens a quick note, Ctrl+N starts a new entry.")
+pub fn empty_day(caps: &str, shot: &str) -> String {
+    let shot = if shot.is_empty() { String::new() } else { format!(", {shot} takes a screenshot") };
+    format!("Nothing here yet. Ctrl+C+C saves the clipboard instantly, {caps} opens a quick note{shot}, Ctrl+N starts a new entry. F1 lists everything.")
 }
 
 pub const EMPTY_NAMED: &str = "No named entries yet. Press F2 in a note to give it a name.";
 pub const EMPTY_BIN: &str = "The bin is empty.";
 pub const NO_MATCHES: &str = "No matches.";
 
-// ---------- shortcut lists ----------
+// ---------- shortcut lists (F1) ----------
+//
+// Everything Omniaware can do, in one list. F1 shows it in the capture popup and in the main
+// window; README.md mirrors it. Global shortcuts come from config.toml, so a changed or
+// disabled key is shown as it really is.
 
-/// Keycaps + description.
-pub type Row = (&'static [&'static str], &'static str);
-pub type Group = (&'static str, &'static [Row]);
+/// Keycaps + description, for the fixed parts of the list.
+type Row = (&'static [&'static str], &'static str);
 
-const GLOBAL: &[Row] = &[
-    (&["Ctrl", "C", "C"], "silent capture"),
-    (&["Ctrl", "Alt", "O"], "note → expand → close"),
-    (&["Ctrl", "Alt", "S"], "screenshot"),
-    (&["Ctrl", "Alt", "Shift", "S"], "screenshot, whole screen"),
-    (&["Ctrl", "Shift", "T"], "next theme"),
+pub struct KeyRow {
+    pub keys: Vec<String>,
+    pub what: String,
+}
+
+pub struct KeyGroup {
+    pub title: &'static str,
+    pub rows: Vec<KeyRow>,
+    /// A line under the rows (what happens to a screenshot, search syntax, …).
+    pub note: Option<&'static str>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    Capture,
+    Main,
+}
+
+fn rows(list: &[Row]) -> Vec<KeyRow> {
+    list.iter().map(|(k, w)| KeyRow { keys: k.iter().map(|s| s.to_string()).collect(), what: w.to_string() }).collect()
+}
+
+fn group(title: &'static str, list: &[Row], note: Option<&'static str>) -> KeyGroup {
+    KeyGroup { title, rows: rows(list), note }
+}
+
+const SHOT_KEYS: &[Row] = &[
+    (&["Drag"], "an area"),
+    (&["Click"], "a window"),
+    (&["Click", "desktop"], "that whole screen"),
+    (&["Enter"], "the screen under the pointer"),
+    (&["Esc"], "cancel (or right-click)"),
 ];
+const SHOT_NOTE: &str = "Every shot goes to today's journal, the clipboard and Pictures\\OA Screenshots. The game or app in front keeps focus.";
+
+const CAPTURE_NOTE: &[Row] = &[
+    (&["Esc"], "save and close (empty = nothing saved)"),
+    (&["Shift", "Esc"], "discard (to the bin)"),
+    (&["Ctrl", "S"], "save a version now"),
+    (&["Ctrl", "Shift", "S"], "save the text as a file"),
+    (&["Ctrl", "V"], "paste text or an image"),
+    (&["Ctrl", "Click"], "open a link"),
+    (&["F1"], "all shortcuts (hold or click)"),
+];
+const NAMING_CAPTURE: &[Row] = &[
+    (&["F2"], "name the entry (a reusable snippet)"),
+    (&["Enter"], "keep the name, back to the text"),
+    (&["Tab"], "same, or click elsewhere"),
+    (&["Ctrl", "Enter"], "keep the name and close"),
+    (&["Esc"], "cancel naming"),
+];
+const NAMING_MAIN: &[Row] = &[
+    (&["F2"], "name the entry (a reusable snippet)"),
+    (&["Enter"], "keep the name, back to the text"),
+    (&["Tab"], "same, or click elsewhere"),
+];
+const NAMING_NOTE: &str = "A name already in use: press Enter again to move it here. The other entry keeps its text, unnamed.";
+
+const SEND_KEYS: &[Row] = &[
+    (&["Ctrl", "Enter"], "send to the suggestion in the footer"),
+    (&["Ctrl", "Shift", "Enter"], "choose where to send"),
+    (&["1", "–", "5"], "pick and send (PowerShell, WSL, cmd, Explorer, previous window)"),
+    (&["↑", "↓"], "move"),
+    (&["A"], "as administrator"),
+    (&["D"], "don't ask again (for that target)"),
+    (&["Enter"], "send"),
+    (&["Esc"], "cancel"),
+];
+const SEND_NOTE: &str = "Text lands on the shell's prompt line and is never run: read it, then press Enter yourself.";
+
 const IMAGES: &[Row] = &[
     (&["Click"], "select"),
     (&["Ctrl", "Click"], "select several"),
     (&["Double-click"], "enlarge"),
-    (&["Right-click"], "menu"),
-    (&["Delete"], "remove selected"),
+    (&["Right-click"], "copy, save as, open with, show in folder, remove"),
+    (&["Delete"], "remove the selected"),
+    (&["Esc"], "deselect / close the enlarged view"),
 ];
 
-pub const CAPTURE_KEYS: &[Group] = &[
-    (
-        QUICK_NOTE,
-        &[
-            (&["Esc"], "save and close"),
-            (&["Ctrl", "S"], "save a version"),
-            (&["Ctrl", "Shift", "S"], "save as file"),
-            (&["F2"], "name"),
-            (&["Ctrl", "V"], "paste image"),
-            (&["Ctrl", "Click"], "open link"),
-            (&["Ctrl", "Alt", "O"], "expand"),
-            (&["Ctrl", "Enter"], "send to suggestion"),
-            (&["Ctrl", "Shift", "Enter"], "send to…"),
-            (&["Shift", "Esc"], "discard"),
-        ],
-    ),
-    ("Images", IMAGES),
-    ("Global", GLOBAL),
+const TIMELINE_KEYS: &[Row] = &[
+    (&["←", "→"], "previous / next day"),
+    (&["T"], "today"),
+    (&["Click", "a day"], "go there (calendar)"),
+    (&["Ctrl", "N"], "new entry"),
+    (&["Ctrl", "K"], "search"),
+];
+const ENTRY_KEYS: &[Row] = &[
+    (&["Ctrl", "S"], "save a version now"),
+    (&["Ctrl", "Shift", "S"], "save the text as a file"),
+    (&["Ctrl", "E"], "edit / preview"),
+    (&["Ctrl", "V"], "paste text or an image"),
+    (&["Ctrl", "Click"], "open a link"),
+    (&["Esc"], "back to the list"),
+];
+const LIST_KEYS: &[Row] = &[
+    (&["Click"], "open"),
+    (&["Ctrl", "Click"], "select / deselect"),
+    (&["Shift", "Click"], "select a range"),
+    (&["Ctrl", "Shift", "Click"], "add a range"),
+    (&["Ctrl", "A"], "select all in the list"),
+    (&["Ctrl", "Shift", "S"], "export the selection as one file"),
+    (&["Delete"], "move to the bin (in the bin: delete forever, press twice)"),
+    (&["Esc"], "clear the selection"),
+];
+const SEARCH_KEYS: &[Row] = &[
+    (&["↑", "↓"], "select"),
+    (&["Enter"], "open"),
+    (&["Shift", "Enter"], "paste into the window you came from"),
+];
+const SEARCH_NOTE: &str = "Words match inside words (affe finds Kaffekannor). * and ? are wildcards, /…/ is a regular expression.";
+const WINDOW_KEYS: &[Row] = &[
+    (&["F1"], "show / hide this panel"),
+    (&["Ctrl", "Shift", "T"], "next theme"),
+    (&["Esc"], "back, then timeline, then close"),
 ];
 
-pub const MAIN_KEYS: &[Group] = &[
-    (TIMELINE, &[(&["←", "→"], "day"), (&["T"], "today"), (&["Ctrl", "N"], "new entry"), (&["Ctrl", "K"], "search")]),
-    (
-        ENTRY,
-        &[
-            (&["Ctrl", "S"], "save a version"),
-            (&["Ctrl", "Shift", "S"], "save as file"),
-            (&["F2"], "name"),
-            (&["Ctrl", "E"], "preview"),
-            (&["Ctrl", "Enter"], "send to suggestion"),
-            (&["Ctrl", "Shift", "Enter"], "send to…"),
-            (&["Ctrl", "V"], "paste image"),
-            (&["Ctrl", "Click"], "open link"),
-            (&["Esc"], "back"),
-        ],
-    ),
-    (
-        "Lists",
-        &[
-            (&["Ctrl", "Click"], "select / deselect"),
-            (&["Shift", "Click"], "select a range"),
-            (&["Ctrl", "Shift", "Click"], "add a range"),
-            (&["Ctrl", "A"], "select all in the list"),
-            (&["Ctrl", "Shift", "S"], "export as one file"),
-            (&["Delete"], "move to bin"),
-            (&["Esc"], "clear selection"),
-        ],
-    ),
-    (SEARCH, &[(&["↑", "↓"], "select"), (&["Enter"], "open"), (&["Shift", "Enter"], "paste")]),
-    ("Images", IMAGES),
-    ("Global", GLOBAL),
-];
+/// The always-available part: configured global keys, the tray and the notice.
+fn global(hk: &crate::config::Hotkeys) -> KeyGroup {
+    let caps = crate::theme::hotkey_caps;
+    let mut list = vec![KeyRow { keys: vec!["Ctrl".into(), "C".into(), "C".into()], what: "save the clipboard silently".into() }];
+    let mut add = |spec: &str, what: &str| {
+        if !spec.trim().is_empty() {
+            list.push(KeyRow { keys: caps(spec), what: what.into() });
+        }
+    };
+    add(&hk.capture, "quick note → main window → close");
+    if hk.main != hk.capture {
+        add(&hk.main, "main window");
+    }
+    add(&hk.screenshot, "screenshot: area, window or screen");
+    add(&hk.screenshot_full, "screenshot of the screen now");
+    list.extend(rows(&[
+        (&["Tray", "click"], "quick note"),
+        (&["Tray", "right-click"], "menu: note, main window, screenshot, quit"),
+        (&["Notice", "click"], "open what was just saved"),
+    ]));
+    KeyGroup { title: "Global", rows: list, note: Some("Global keys can be changed in config.toml.") }
+}
+
+/// The full F1 list for the capture popup or the main window. Global first: it is what is
+/// needed when a shortcut has been forgotten.
+pub fn shortcut_list(hk: &crate::config::Hotkeys, place: Place) -> Vec<KeyGroup> {
+    let mut g = vec![global(hk)];
+    let shot_title = "Screenshot overlay";
+    match place {
+        Place::Capture => {
+            g.push(group(QUICK_NOTE, CAPTURE_NOTE, None));
+            g.push(group("Naming", NAMING_CAPTURE, Some(NAMING_NOTE)));
+            g.push(group("Send to a shell", SEND_KEYS, Some(SEND_NOTE)));
+            g.push(group("Images", IMAGES, None));
+            g.push(group(shot_title, SHOT_KEYS, Some(SHOT_NOTE)));
+            g.push(group("Themes", &[(&["Ctrl", "Shift", "T"], "next theme")], None));
+        }
+        Place::Main => {
+            g.push(group(TIMELINE, TIMELINE_KEYS, None));
+            g.push(group(ENTRY, ENTRY_KEYS, None));
+            g.push(group("Naming", NAMING_MAIN, Some(NAMING_NOTE)));
+            g.push(group("Send to a shell", SEND_KEYS, Some(SEND_NOTE)));
+            g.push(group("Lists", LIST_KEYS, None));
+            g.push(group(SEARCH, SEARCH_KEYS, Some(SEARCH_NOTE)));
+            g.push(group("Images", IMAGES, None));
+            g.push(group(shot_title, SHOT_KEYS, Some(SHOT_NOTE)));
+            g.push(group("Window", WINDOW_KEYS, None));
+        }
+    }
+    g
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_keys_follow_config() {
+        let mut hk = crate::config::Hotkeys::default();
+        let list = shortcut_list(&hk, Place::Main);
+        let g = &list[0];
+        assert_eq!(g.title, "Global");
+        let has = |g: &KeyGroup, keys: &[&str]| g.rows.iter().any(|r| r.keys == keys);
+        assert!(has(g, &["Ctrl", "Alt", "O"]));
+        assert!(has(g, &["Ctrl", "Alt", "S"]));
+        assert!(has(g, &["Ctrl", "Alt", "Shift", "S"]));
+        hk.screenshot_full = String::new();
+        hk.screenshot = "ctrl+shift+KeyP".into();
+        let g = &shortcut_list(&hk, Place::Capture)[0];
+        assert!(!has(g, &["Ctrl", "Alt", "Shift", "S"]));
+        assert!(has(g, &["Ctrl", "Shift", "P"]));
+    }
+
+    #[test]
+    fn both_places_list_everything_shared() {
+        for place in [Place::Capture, Place::Main] {
+            let titles: Vec<_> = shortcut_list(&Default::default(), place).iter().map(|g| g.title).collect();
+            for t in ["Global", "Naming", "Send to a shell", "Images", "Screenshot overlay"] {
+                assert!(titles.contains(&t), "{t} missing");
+            }
+        }
+    }
+}

@@ -307,7 +307,7 @@ pub fn hotkey_caps(spec: &str) -> Vec<String> {
         .collect()
 }
 
-use crate::text::{self as t, Group};
+use crate::text::{self as t, KeyGroup};
 
 pub fn month_name(m: u32) -> &'static str {
     t::MONTHS[(m as usize).saturating_sub(1) % 12]
@@ -328,38 +328,42 @@ pub fn day_long(d: NaiveDate, today: NaiveDate) -> String {
 const CAP_SPACING: f32 = 3.0;
 
 /// Width `keycap` rows take for these keys.
-fn keycaps_width(ui: &Ui, keys: &[&str]) -> f32 {
+fn keycaps_width(ui: &Ui, keys: &[String]) -> f32 {
     let font = egui::FontId::proportional(11.5);
     let caps: f32 = keys
         .iter()
-        .map(|k| ui.fonts_mut(|f| f.layout_no_wrap(k.to_string(), font.clone(), Color32::PLACEHOLDER).size().x) + 12.0)
+        .map(|k| ui.fonts_mut(|f| f.layout_no_wrap(k.clone(), font.clone(), Color32::PLACEHOLDER).size().x) + 12.0)
         .sum();
     caps + CAP_SPACING * keys.len().saturating_sub(1) as f32
 }
 
 /// Grouped shortcut list: keycaps in a fixed column, descriptions wrapping in the rest, so the
 /// list always fits the width it is given (side panel, help overlay).
-pub fn shortcut_groups(ui: &mut Ui, groups: &[Group]) {
+pub fn shortcut_groups(ui: &mut Ui, groups: &[KeyGroup]) {
     let avail = ui.available_width();
     let gap = 8.0;
-    let widest = groups.iter().flat_map(|(_, rows)| rows.iter()).map(|(keys, _)| keycaps_width(ui, keys)).fold(0.0, f32::max);
+    let widest = groups.iter().flat_map(|g| g.rows.iter()).map(|r| keycaps_width(ui, &r.keys)).fold(0.0, f32::max);
     let kw = widest.min(avail * 0.55);
-    for (title, rows) in groups {
-        ui.label(RichText::new(*title).family(medium()).size(12.5).color(p().accent));
+    for g in groups {
+        ui.label(RichText::new(g.title).family(medium()).size(12.5).color(p().accent));
         ui.add_space(2.0);
-        for (keys, what) in rows.iter() {
+        for r in &g.rows {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
                 ui.allocate_ui_with_layout(egui::vec2(kw, 18.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.set_min_width(kw);
                     ui.spacing_mut().item_spacing.x = CAP_SPACING;
-                    for k in keys.iter() {
+                    for k in &r.keys {
                         keycap(ui, k);
                     }
                 });
-                ui.add(egui::Label::new(RichText::new(*what).color(p().weak).size(12.0)).wrap());
+                ui.add(egui::Label::new(RichText::new(&r.what).color(p().weak).size(12.0)).wrap());
             });
             ui.add_space(-2.0);
+        }
+        if let Some(n) = g.note {
+            ui.add_space(4.0);
+            ui.add(egui::Label::new(RichText::new(n).color(p().faint).size(11.5)).wrap());
         }
         ui.add_space(10.0);
     }

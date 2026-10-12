@@ -89,6 +89,7 @@ impl App {
         let send_label = self.send_label();
         let naming = self.capture_naming;
         let show_help = self.capture_help || ctx.input(|i| i.key_down(Key::F1));
+        let keys = if show_help { t::shortcut_list(&self.cfg.hotkeys, t::Place::Capture) } else { Vec::new() };
         let mut foot: Option<Foot> = None;
         let dir = self.dir.clone();
         let today = chrono::Local::now().date_naive();
@@ -200,13 +201,23 @@ impl App {
                             ui.set_width(w);
                             egui::ScrollArea::vertical().max_height(room.y.max(120.0)).auto_shrink([false, true]).show(ui, |ui| {
                                 if w >= 480.0 {
+                                    // Two columns, split where the rows are about even.
+                                    let half = keys.iter().map(|g| g.rows.len() + 2).sum::<usize>() / 2;
+                                    let mut acc = 0;
+                                    let split = keys
+                                        .iter()
+                                        .position(|g| {
+                                            acc += g.rows.len() + 2;
+                                            acc >= half
+                                        })
+                                        .map_or(keys.len(), |i| i + 1);
                                     ui.columns(2, |c| {
-                                        theme::shortcut_groups(&mut c[0], &t::CAPTURE_KEYS[..1]);
-                                        theme::shortcut_groups(&mut c[1], &t::CAPTURE_KEYS[1..]);
+                                        theme::shortcut_groups(&mut c[0], &keys[..split]);
+                                        theme::shortcut_groups(&mut c[1], &keys[split..]);
                                         theme::status_legend(&mut c[1]);
                                     });
                                 } else {
-                                    theme::shortcut_groups(ui, t::CAPTURE_KEYS);
+                                    theme::shortcut_groups(ui, &keys);
                                     theme::status_legend(ui);
                                 }
                             });
