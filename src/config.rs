@@ -38,6 +38,10 @@ pub struct Hotkeys {
     pub capture: String,
     /// Optional direct shortcut for the main window ("" = none).
     pub main: String,
+    /// Screenshot: freeze the screens, then drag an area or click a window ("" = off).
+    pub screenshot: String,
+    /// Screenshot of the screen under the pointer at once, nothing shown ("" = off).
+    pub screenshot_full: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -67,7 +71,12 @@ impl Default for Config {
 }
 impl Default for Hotkeys {
     fn default() -> Self {
-        Self { capture: "ctrl+alt+KeyO".into(), main: String::new() }
+        Self {
+            capture: "ctrl+alt+KeyO".into(),
+            main: String::new(),
+            screenshot: "ctrl+alt+KeyS".into(),
+            screenshot_full: "ctrl+alt+shift+KeyS".into(),
+        }
     }
 }
 impl Default for WindowCfg {
@@ -76,7 +85,8 @@ impl Default for WindowCfg {
     }
 }
 
-pub const CONFIG_VERSION: u32 = 3;
+/// 4: screenshot hotkeys (written into existing files so they can be found and changed).
+pub const CONFIG_VERSION: u32 = 4;
 
 /// %OMNIAWARE_DATA% if set, else %APPDATA%\Omniaware (moved from the pre-rename %APPDATA%\Omniware once).
 pub fn data_dir() -> PathBuf {

@@ -4,7 +4,7 @@ A lightweight, keyboard-first home for everything I don't want to lose: clipboar
 
 I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markdown editor and browser-based note tools. The goals are simple: it should be there the instant I need it, stay out of the way when I don't, and never lose a single character — not even on a power cut.
 
-> **Status:** early development (v0.7). Windows 10/11 only. The interface is in British English.
+> **Status:** early development (v0.8). Windows 10/11 only. The interface is in British English.
 
 ![Omniaware main window: timeline, calendar and named entries](assets/screenshots/main-window.png)
 
@@ -19,6 +19,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 
 - **Silent capture** — press `Ctrl+C` twice in quick succession and the clipboard (text or image) is saved straight to today's journal. The tray icon briefly turns green; nothing else interrupts you.
 - **One key for everything else** — `Ctrl+Alt+O` opens a small capture window pre-filled with the clipboard. Press it again and the same note expands into the main window: a day-by-day timeline, a month calendar marking days with content, named entries and a recycle bin. Press it a third time to put everything away.
+- **Screenshots** — `Ctrl+Alt+S` freezes every screen under a dimmed overlay, much like `Win+Shift+S`: drag an area, click a window, click the desktop (or press `Enter`) for the whole screen, `Esc` or a right-click to cancel. `Ctrl+Alt+Shift+S` takes the screen under the pointer at once, with nothing shown. Each shot lands in today's journal, on the clipboard and in `Pictures\OA Screenshots` as `OA 2026-10-12 14.32.07.png`, followed by the usual notice. The overlay never takes focus, so a game in borderless full screen is neither minimised nor interrupted; for games with mouselook, use `Ctrl+Alt+Shift+S`.
 - **Search** — `Ctrl+K` searches everything. Words match anywhere inside words (`affe` finds *Kaffekannor*), `*` and `?` are wildcards, and `/…/` takes a full regular expression. Each hit shows the matching line with the match highlighted; `Shift+Enter` pastes the result straight into the window you came from.
 - **Tidy up in bulk** — every list supports `Ctrl`+click, `Shift`+click and `Ctrl+Shift`+click selection, `Ctrl+A` selects the whole list on screen, and `Delete` moves the selection to the bin. The bin can restore, delete forever or be emptied.
 - **A word when it's saved** — closing a note or capturing silently shows a small notice above the system tray (what was saved, where, and how much). Click it to open the entry; hover to keep it.
@@ -47,6 +48,8 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 |---|---|
 | `Ctrl+C` `C` | Save the clipboard silently (hold `Ctrl`, tap `C` twice) |
 | `Ctrl+Alt+O` (or `AltGr+O`) | 1st press: capture popup · 2nd: expand to the main window · 3rd: close |
+| `Ctrl+Alt+S` | Screenshot: drag an area, click a window or the desktop, `Enter` for the whole screen, `Esc` to cancel |
+| `Ctrl+Alt+Shift+S` | Screenshot of the screen under the pointer, at once |
 | Tray icon click | Capture popup |
 | `Ctrl+Shift+T` (in Omniaware) | Next theme: dark → light → system → voidflow |
 
@@ -143,6 +146,8 @@ scanlines = false            # faint CRT scanlines over the VoidFlow theme
 [hotkeys]
 capture = "ctrl+alt+KeyO"    # modifiers: ctrl / alt / shift / super
 main = ""                    # optional direct shortcut to the main window
+screenshot = "ctrl+alt+KeyS"            # "" turns a shortcut off
+screenshot_full = "ctrl+alt+shift+KeyS"
 
 [window]
 width = 640.0                # capture popup
@@ -159,7 +164,7 @@ skip_confirm = []            # targets that no longer ask: "pwsh", "cmd", "wsl",
 
 ## Roadmap
 
-- Screenshots (`Ctrl+Alt+S`): rectangle, window or full screen, straight into an entry, the clipboard and a folder of your choice
+- Arrows, boxes and highlights on screenshots
 - Events with natural-language dates in Swedish (`imorgon 14 tandläkare`), a full calendar view and reminders
 - Desktop post-it notes
 - An aggregated to-do view built from Markdown task lists

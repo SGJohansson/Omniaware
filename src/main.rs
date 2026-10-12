@@ -16,6 +16,7 @@ mod notice;
 mod search;
 mod send;
 mod send_ui;
+mod shot;
 mod theme;
 mod tray;
 mod win;

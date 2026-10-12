@@ -33,6 +33,11 @@ struct Signals {
     unflash: AtomicBool,
     main: AtomicBool,
     quit: AtomicBool,
+    /// Ctrl+Alt+S / Ctrl+Alt+Shift+S.
+    shot: AtomicBool,
+    shot_full: AtomicBool,
+    /// Finished screenshots, handed over from the screenshot thread.
+    shots: std::sync::Mutex<Vec<crate::shot::Outcome>>,
     /// Notice clicked: open this entry (0 = none).
     open_entry: std::sync::atomic::AtomicI64,
 }
@@ -132,8 +137,12 @@ impl App {
             Ok(mgr) => {
                 // `main` is optional; skip it when empty or identical to `capture`.
                 let main = if cfg.hotkeys.main == cfg.hotkeys.capture { "" } else { cfg.hotkeys.main.as_str() };
-                let specs: [(&str, fn(&Signals) -> &AtomicBool); 2] =
-                    [(&cfg.hotkeys.capture, |s| &s.capture), (main, |s| &s.main)];
+                let specs: [(&str, fn(&Signals) -> &AtomicBool); 4] = [
+                    (&cfg.hotkeys.capture, |s| &s.capture),
+                    (main, |s| &s.main),
+                    (&cfg.hotkeys.screenshot, |s| &s.shot),
+                    (&cfg.hotkeys.screenshot_full, |s| &s.shot_full),
+                ];
                 for (spec, flag) in specs {
                     if spec.trim().is_empty() {
                         continue;
@@ -179,12 +188,19 @@ impl App {
         let tray = match if cfg!(windows) { tray::build() } else { Err("tray: Windows only".into()) } {
             Ok(t) => {
                 let (s, c) = (sig.clone(), ctx.clone());
-                let (cap, main, quit) = (t.capture_id.clone(), t.main_id.clone(), t.quit_id.clone());
+                let (cap, main, shot, quit) = (t.capture_id.clone(), t.main_id.clone(), t.shot_id.clone(), t.quit_id.clone());
                 MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
                     if e.id == cap {
                         poke(&s, &c, |s| &s.capture);
                     } else if e.id == main {
                         poke(&s, &c, |s| &s.main);
+                    } else if e.id == shot {
+                        // Let the menu fade out first, or it ends up in the picture.
+                        let (s, c) = (s.clone(), c.clone());
+                        std::thread::spawn(move || {
+                            std::thread::sleep(Duration::from_millis(300));
+                            poke(&s, &c, |s| &s.shot);
+                        });
                     } else if e.id == quit {
                         poke(&s, &c, |s| &s.quit);
                     }
@@ -727,6 +743,61 @@ impl App {
         self.flash_tray(ctx);
     }
 
+    /// Ctrl+Alt+S (overlay) or Ctrl+Alt+Shift+S (`full`: the screen under the pointer, at once).
+    fn screenshot(&self, ctx: &egui::Context, full: bool) {
+        let (s, c) = (self.sig.clone(), ctx.clone());
+        crate::shot::start(full, self.dir.clone(), move |o| {
+            s.shots.lock().unwrap_or_else(|e| e.into_inner()).push(o);
+            c.request_repaint();
+        });
+    }
+
+    /// A finished screenshot becomes an image entry in today's journal, like Ctrl+C+C.
+    fn screenshot_done(&mut self, ctx: &egui::Context, o: crate::shot::Outcome) {
+        use crate::notice::Notice;
+        let s = match o {
+            crate::shot::Outcome::Saved(s) => s,
+            crate::shot::Outcome::Cancelled => return,
+            crate::shot::Outcome::Failed(e) => {
+                log::error(e.clone());
+                return crate::notice::show(Notice::error(e));
+            }
+        };
+        let blob = format!("{}.png", s.hash);
+        let res = self
+            .db
+            .add_blob(&s.hash, "image/png")
+            .and_then(|()| self.db.insert(""))
+            .and_then(|id| self.db.add_attachment(id, &blob).map(|_| id));
+        let id = match res {
+            Ok(id) => id,
+            Err(e) => {
+                log::error(format!("screenshot: {e}"));
+                return crate::notice::show(Notice::error(e.to_string()));
+            }
+        };
+        self.main.stale = true;
+        if let Some(e) = &s.clipboard {
+            log::error(format!("screenshot clipboard: {e}"));
+        }
+        let (v, u) = doc::fmt_size(s.bytes);
+        let place = match &s.file {
+            Ok(_) => crate::shot::FOLDER,
+            Err(e) => {
+                log::error(format!("screenshot file: {e}"));
+                t::SHOT_NO_FILE
+            }
+        };
+        let today = theme::day_short(chrono::Local::now().date_naive());
+        crate::notice::show(Notice::ok(
+            t::NOTICE_SHOT,
+            format!("{} · {today}", t::JOURNAL),
+            format!("{}×{} px · {v} {u} · {place}", s.w, s.h),
+            Some(id),
+        ));
+        self.flash_tray(ctx);
+    }
+
     /// "✓ Saved · Journal · Mon 5 Oct" / "42 words · 1 image · 270.7 kB".
     fn saved_notice(&self, d: &Doc) -> crate::notice::Notice {
         let context = match &d.saved_name {
@@ -870,6 +941,16 @@ impl eframe::App for App {
         }
         if self.sig.stash.swap(false, SeqCst) {
             self.stash(ctx);
+        }
+        if self.sig.shot.swap(false, SeqCst) {
+            self.screenshot(ctx, false);
+        }
+        if self.sig.shot_full.swap(false, SeqCst) {
+            self.screenshot(ctx, true);
+        }
+        let shots = std::mem::take(&mut *self.sig.shots.lock().unwrap_or_else(|e| e.into_inner()));
+        for o in shots {
+            self.screenshot_done(ctx, o);
         }
         let open = self.sig.open_entry.swap(0, SeqCst);
         if open != 0 {

@@ -16,6 +16,7 @@ pub const MONTHS: [&str; 12] = [
 
 pub const TRAY_CAPTURE: &str = "Quick note";
 pub const TRAY_MAIN: &str = "Open Omniaware";
+pub const TRAY_SHOT: &str = "Screenshot";
 pub const TRAY_QUIT: &str = "Quit";
 
 // ---------- sections ----------
@@ -205,6 +206,12 @@ pub const NOTICE_ALREADY: &str = "Already captured";
 pub const NOTICE_FAILED: &str = "Couldn't save";
 pub const NOTICE_SEE_LOG: &str = "see omniaware.log";
 
+// ---------- screenshots ----------
+
+pub const NOTICE_SHOT: &str = "Screenshot";
+pub const SHOT_HINT: &str = "drag an area  ·  click a window  ·  enter: whole screen  ·  esc: cancel";
+pub const SHOT_NO_FILE: &str = "not in Pictures (see log)";
+
 // ---------- naming ----------
 
 pub const NAME_EMPTY: &str = "Empty entry, nothing to name.";
@@ -263,6 +270,8 @@ pub type Group = (&'static str, &'static [Row]);
 const GLOBAL: &[Row] = &[
     (&["Ctrl", "C", "C"], "silent capture"),
     (&["Ctrl", "Alt", "O"], "note → expand → close"),
+    (&["Ctrl", "Alt", "S"], "screenshot"),
+    (&["Ctrl", "Alt", "Shift", "S"], "screenshot, whole screen"),
     (&["Ctrl", "Shift", "T"], "next theme"),
 ];
 const IMAGES: &[Row] = &[

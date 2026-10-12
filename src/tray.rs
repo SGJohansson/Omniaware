@@ -5,6 +5,7 @@ pub struct Tray {
     icon: TrayIcon,
     pub capture_id: MenuId,
     pub main_id: MenuId,
+    pub shot_id: MenuId,
     pub quit_id: MenuId,
 }
 
@@ -12,8 +13,9 @@ pub fn build() -> Result<Tray, Box<dyn std::error::Error>> {
     let menu = Menu::new();
     let capture = MenuItem::new(crate::text::TRAY_CAPTURE, true, None);
     let main = MenuItem::new(crate::text::TRAY_MAIN, true, None);
+    let shot = MenuItem::new(crate::text::TRAY_SHOT, true, None);
     let quit = MenuItem::new(crate::text::TRAY_QUIT, true, None);
-    menu.append_items(&[&capture, &main, &PredefinedMenuItem::separator(), &quit])?;
+    menu.append_items(&[&capture, &main, &shot, &PredefinedMenuItem::separator(), &quit])?;
     let icon = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false)
@@ -24,6 +26,7 @@ pub fn build() -> Result<Tray, Box<dyn std::error::Error>> {
         icon,
         capture_id: capture.id().clone(),
         main_id: main.id().clone(),
+        shot_id: shot.id().clone(),
         quit_id: quit.id().clone(),
     })
 }
