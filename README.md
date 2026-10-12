@@ -4,7 +4,7 @@ A lightweight, keyboard-first home for everything I don't want to lose: clipboar
 
 I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markdown editor and browser-based note tools. The goals are simple: it should be there the instant I need it, stay out of the way when I don't, and never lose a single character — not even on a power cut.
 
-> **Status:** early development (v0.8). Windows 10/11 only. The interface is in British English.
+> **Status:** v1.0, in daily use. Windows 10/11 only. The interface is in British English.
 >
 > **Forgot a shortcut?** Press `F1` anywhere in Omniaware for the full list, or see [Keyboard shortcuts](#keyboard-shortcuts).
 
@@ -185,7 +185,7 @@ Run it again after pulling a new version; it closes the running copy, replaces i
 
 ### Measuring resource use
 
-Omniaware is meant to sit in the background all day, so what it costs there is measured rather than guessed. Every CI build has an `omniaware-bench-kit` artifact: `omniaware.exe`, `oa-probe.exe` and a short guide. Unzip it on any Windows machine and run `oa-probe.exe`; it starts a separate benchmark copy of Omniaware (its own data, no global shortcuts, no clipboard writes, so a real copy keeps running) and records CPU, memory, GPU memory, handles and threads for up to 72 hours, alternating the `wgpu` and `glow` renderers. Results, including a description of the machine, are written next to the probe in `bench\<COMPUTERNAME>\`.
+Omniaware is meant to sit in the background all day, so what it costs there is measured rather than guessed. Every CI build has an `omniaware-bench-kit` artifact: `omniaware.exe`, `oa-probe.exe` and a short guide. Unzip it on any Windows machine and run `oa-probe.exe` (or `start-hidden.cmd` for no console window, only a tray icon that stops it); it starts a separate, hidden benchmark copy of Omniaware (its own data, no global shortcuts, no clipboard writes, so a real copy keeps running) and records CPU, memory, GPU memory, handles and threads for up to 72 hours, alternating the `wgpu` and `glow` renderers. Results, including a description of the machine, are written next to the probe in `bench\<COMPUTERNAME>\`.
 
 ## Data and durability
 

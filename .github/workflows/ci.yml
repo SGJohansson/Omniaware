@@ -40,6 +40,7 @@ jobs:
           New-Item -ItemType Directory -Force bench-kit | Out-Null
           Copy-Item target/release/omniaware.exe, target/release/oa-probe.exe bench-kit/
           Copy-Item scripts/bench-kit.txt bench-kit/README.txt
+          Copy-Item scripts/start-hidden.cmd bench-kit/
 
       - name: Upload benchmark kit
         uses: actions/upload-artifact@v4

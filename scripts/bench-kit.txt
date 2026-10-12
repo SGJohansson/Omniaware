@@ -8,9 +8,20 @@ What it is
 
 How to run
   1. Copy this folder anywhere on the machine (a local disk is best).
-  2. Double-click oa-probe.exe. A console window shows the live numbers.
-  3. Leave it for 24-72 hours. It stops by itself after 72 hours; Ctrl+C or closing
-     the window stops it earlier (its Omniaware closes with it).
+  2. Either
+       double-click oa-probe.exe      a console window shows the live numbers, or
+       double-click start-hidden.cmd  no window at all; an amber tray icon instead
+                                      (right-click it -> Stop benchmark). Best on
+                                      machines where someone else might close a
+                                      big black window by mistake.
+  3. Leave it for 24-72 hours. It stops by itself after 72 hours; Ctrl+C, closing
+     the window or the tray icon's Stop stops it earlier (its Omniaware closes
+     with it).
+
+  The probe starts omniaware.exe itself, hidden: there is no window, only a tray
+  icon called "Omniaware (benchmark)". Do not start omniaware.exe yourself. The
+  benchmark copy's shortcuts (Ctrl+Alt+O etc.) are switched off on purpose, so
+  that a real Omniaware on the same machine keeps them.
 
 What it touches
   Only this folder. The benchmark copy of Omniaware keeps its database, log and
@@ -30,3 +41,4 @@ Options
   --switch H      hours per renderer before switching wgpu <-> glow (2)
   --idle M        minutes without input before a scenario may run (10)
   --no-scenarios  only measure the idle background cost
+  --hidden        no console window; a tray icon stops it (what start-hidden.cmd does)

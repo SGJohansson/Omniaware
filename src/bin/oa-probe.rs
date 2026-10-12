@@ -14,6 +14,7 @@
 //! Closing the probe closes its Omniaware too (job object).
 //!
 //! Options: --hours N (72) · --interval S (10) · --switch H (2) · --idle M (10) · --no-scenarios
+//! · --hidden (no console window; a tray icon stops it, see `start-hidden.cmd`)
 
 #[cfg(not(windows))]
 fn main() {
@@ -85,10 +86,13 @@ mod probe {
         switch_h: f64,
         idle_min: u64,
         scenarios: bool,
+        hidden: bool,
+        /// Internal: the detached copy `--hidden` starts.
+        detached: bool,
     }
 
     fn opts() -> Result<Opts, String> {
-        let mut o = Opts { hours: 72.0, interval: 10, switch_h: 2.0, idle_min: 10, scenarios: true };
+        let mut o = Opts { hours: 72.0, interval: 10, switch_h: 2.0, idle_min: 10, scenarios: true, hidden: false, detached: false };
         let mut a = std::env::args().skip(1);
         while let Some(k) = a.next() {
             let mut num = || a.next().and_then(|v| v.parse::<f64>().ok()).ok_or(format!("{k} needs a number"));
@@ -98,6 +102,8 @@ mod probe {
                 "--switch" => o.switch_h = num()?.max(0.1),
                 "--idle" => o.idle_min = num()? as u64,
                 "--no-scenarios" => o.scenarios = false,
+                "--hidden" => o.hidden = true,
+                "--detached" => o.detached = true,
                 "-h" | "--help" => return Err(String::new()),
                 _ => return Err(format!("unknown option {k}")),
             }
@@ -112,10 +118,28 @@ mod probe {
                 if !e.is_empty() {
                     eprintln!("{e}");
                 }
-                eprintln!("oa-probe {VERSION}: --hours N (72) --interval S (10) --switch H (2) --idle M (10) --no-scenarios");
+                eprintln!("oa-probe {VERSION}: --hours N (72) --interval S (10) --switch H (2) --idle M (10) --no-scenarios --hidden");
                 return 2;
             }
         };
+        // --hidden: start a copy with no console at all (nothing for anyone to close by
+        // accident) and leave. The copy shows a tray icon that stops it.
+        if o.hidden && !o.detached {
+            use std::os::windows::process::CommandExt;
+            const DETACHED_PROCESS: u32 = 0x0000_0008;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let args: Vec<String> = std::env::args().skip(1).filter(|a| a != "--hidden").collect();
+            let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("oa-probe.exe"));
+            return match Command::new(exe).args(args).arg("--detached").creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW).spawn() {
+                Ok(_) => 0,
+                Err(e) => {
+                    eprintln!("cannot start the hidden probe: {e}");
+                    pause();
+                    1
+                }
+            };
+        }
+        let tray = o.detached.then(tray::start);
         unsafe {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             let _ = SetConsoleCtrlHandler(Some(on_ctrl), true);
@@ -140,7 +164,9 @@ mod probe {
         println!("oa-probe {VERSION} · {host}");
         println!("{}", machine_line());
         println!("Results: {}", out.display());
-        println!("Running for {} h. Ctrl+C or closing this window stops it (and its Omniaware).\n", o.hours);
+        println!("Running for {} h. Ctrl+C or closing this window stops it (and its Omniaware).", o.hours);
+        println!("The probe starts its own Omniaware, hidden in the tray (\"Omniaware (benchmark)\").");
+        println!("Do not start omniaware.exe yourself; the benchmark copy's shortcuts are off on purpose.\n");
 
         let started = chrono::Local::now();
         let csv_path = out.join(format!("samples-{}.csv", started.format("%Y%m%d-%H%M%S")));
@@ -248,8 +274,73 @@ mod probe {
         }
         let _ = csv.flush();
         let _ = std::fs::write(out.join("summary.txt"), stats.summary(&machine_line()));
+        if let Some(t) = tray {
+            t.stop();
+        }
         println!("\n\nDone. Results in {}", out.display());
         0
+    }
+
+    /// The hidden probe's only face: a tray icon whose menu stops the measurement.
+    mod tray {
+        use std::sync::atomic::Ordering::SeqCst;
+        use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+        use tray_icon::{Icon, TrayIconBuilder};
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::System::Threading::GetCurrentThreadId;
+        use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW, GetMessageW, MSG, PostThreadMessageW, TranslateMessage, WM_QUIT};
+
+        pub struct Tray {
+            thread: u32,
+            join: std::thread::JoinHandle<()>,
+        }
+
+        pub fn start() -> Tray {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let join = std::thread::spawn(move || {
+                let _ = tx.send(unsafe { GetCurrentThreadId() });
+                let menu = Menu::new();
+                let stop = MenuItem::new("Stop benchmark", true, None);
+                if menu.append(&stop).is_err() {
+                    return;
+                }
+                // Amber square: easy to tell from Omniaware's own icon.
+                let px: Vec<u8> = (0..16 * 16).flat_map(|_| [230u8, 160, 40, 255]).collect();
+                let Ok(icon) = Icon::from_rgba(px, 16, 16) else { return };
+                let Ok(_tray) = TrayIconBuilder::new()
+                    .with_menu(Box::new(menu))
+                    .with_tooltip("oa-probe: measuring Omniaware (right-click to stop)")
+                    .with_icon(icon)
+                    .build()
+                else {
+                    return;
+                };
+                let id = stop.id().clone();
+                MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
+                    if e.id == id {
+                        super::STOP.store(true, SeqCst);
+                    }
+                }));
+                let mut msg = MSG::default();
+                unsafe {
+                    while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                }
+            });
+            Tray { thread: rx.recv().unwrap_or(0), join }
+        }
+
+        impl Tray {
+            /// Ends the message loop so the icon is removed rather than left behind.
+            pub fn stop(self) {
+                unsafe {
+                    let _ = PostThreadMessageW(self.thread, WM_QUIT, WPARAM(0), LPARAM(0));
+                }
+                let _ = self.join.join();
+            }
+        }
     }
 
     unsafe extern "system" fn on_ctrl(_t: u32) -> BOOL {
