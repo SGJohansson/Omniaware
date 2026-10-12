@@ -206,10 +206,20 @@ mod imp {
         let decoder = BitmapDecoder::CreateAsync(&stream).and_then(|a| a.join()).map_err(other)?;
         let (w, h) = (decoder.PixelWidth().map_err(other)?, decoder.PixelHeight().map_err(other)?);
         let max = OcrEngine::MaxImageDimension().map_err(other)?.max(1);
-        // Screen text at 100 % scaling is small for the recogniser: twice the size reads better.
-        // Anything over the engine's limit is scaled down to fit.
+        // Screen text at 100 % scaling is small for the recogniser. Small areas (a dialog, a line
+        // picked with Ctrl+Alt+T) are read at three times their size, which mostly ends its
+        // 1/l/I and 0/O mix-ups; larger ones at twice. Anything over the engine's limit is scaled
+        // down to fit.
         let longest = w.max(h).max(1);
-        let k = if longest * 2 <= max && longest <= 2560 { 2.0 } else if longest > max { max as f64 / longest as f64 } else { 1.0 };
+        let k = if longest * 3 <= max && longest <= 1280 {
+            3.0
+        } else if longest * 2 <= max && longest <= 2560 {
+            2.0
+        } else if longest > max {
+            max as f64 / longest as f64
+        } else {
+            1.0
+        };
         let transform = BitmapTransform::new().map_err(other)?;
         if k != 1.0 {
             transform.SetScaledWidth(((w as f64 * k) as u32).max(1)).map_err(other)?;

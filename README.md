@@ -4,7 +4,7 @@ A lightweight, keyboard-first home for everything I don't want to lose: clipboar
 
 I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markdown editor and browser-based note tools. The goals are simple: it should be there the instant I need it, stay out of the way when I don't, and never lose a single character — not even on a power cut.
 
-> **Status:** early development (v0.9). Windows 10/11 only. The interface is in British English.
+> **Status:** early development (v0.10). Windows 10/11 only. The interface is in British English.
 >
 > **Forgot a shortcut?** Press `F1` anywhere in Omniaware for the full list, or see [Keyboard shortcuts](#keyboard-shortcuts).
 
