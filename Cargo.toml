@@ -1,6 +1,6 @@
 [package]
 name = "omniaware"
-version = "1.0.0"
+version = "0.9.0"
 edition = "2024"
 description = "Omniaware – keyboard-first capture, journal and timeline for Windows"
 license = "MIT"
