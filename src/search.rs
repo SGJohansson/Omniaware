@@ -68,19 +68,23 @@ pub struct Hit {
     pub marks: Vec<Range<usize>>,
 }
 
-/// Scores an entry; `None` when a pattern is missing from both name and text.
-pub fn hit(pats: &[Regex], name: &str, body: &str) -> Option<Hit> {
+/// Scores an entry; `None` when a pattern is missing from its name, its text and the text read
+/// from its images (`ocr`). Image text counts a little less than typed text.
+pub fn hit(pats: &[Regex], name: &str, body: &str, ocr: &str) -> Option<Hit> {
     let mut score = 0i64;
     let mut first: Option<Range<usize>> = None;
+    let mut first_ocr: Option<Range<usize>> = None;
     for p in pats {
         let in_name = p.is_match(name);
         let mut n = 0;
-        for m in p.find_iter(body).take(50) {
-            n += 1;
-            let word_start = m.start() == 0 || !body[..m.start()].chars().next_back().is_some_and(char::is_alphanumeric);
-            score += if word_start { 3 } else { 1 };
-            if first.is_none() && !m.range().is_empty() {
-                first = Some(m.range());
+        for (text, weight, first) in [(body, 3, &mut first), (ocr, 2, &mut first_ocr)] {
+            for m in p.find_iter(text).take(50) {
+                n += 1;
+                let word_start = m.start() == 0 || !text[..m.start()].chars().next_back().is_some_and(char::is_alphanumeric);
+                score += if word_start { weight } else { 1 };
+                if first.is_none() && !m.range().is_empty() {
+                    *first = Some(m.range());
+                }
             }
         }
         if !in_name && n == 0 {
@@ -90,9 +94,15 @@ pub fn hit(pats: &[Regex], name: &str, body: &str) -> Option<Hit> {
             score += 20;
         }
     }
-    let (snippet, marks) = match first {
-        Some(r) => snippet(pats, body, r),
-        None => (String::new(), Vec::new()),
+    let (snippet, marks) = match (first, first_ocr) {
+        (Some(r), _) => snippet(pats, body, r),
+        (None, Some(r)) => {
+            // "in image · …Access denied…": the match is in a picture, not in the text.
+            let (s, m) = snippet(pats, ocr, r);
+            let lead = crate::text::SNIPPET_IMAGE;
+            (format!("{lead}{s}"), m.into_iter().map(|m| m.start + lead.len()..m.end + lead.len()).collect())
+        }
+        (None, None) => (String::new(), Vec::new()),
     };
     Some(Hit { score, snippet, marks })
 }
@@ -139,16 +149,16 @@ mod tests {
     #[test]
     fn infix_wildcards_regex() {
         let body = "Ny kaffekanna från Moccamaster, färg: svart";
-        assert!(hit(&all("affe"), "", body).is_some());
-        assert!(hit(&all("KAFFE moccA"), "", body).is_some());
-        assert!(hit(&all("affe zz"), "", body).is_none());
-        assert!(hit(&all("kaffe*kanna"), "", body).is_some());
-        assert!(hit(&all("f?rg"), "", body).is_some());
-        assert!(hit(&all("/m.cca\\w+/"), "", body).is_some());
-        assert!(hit(&all("shopping"), "shopping-list", "nothing").is_some());
+        assert!(hit(&all("affe"), "", body, "").is_some());
+        assert!(hit(&all("KAFFE moccA"), "", body, "").is_some());
+        assert!(hit(&all("affe zz"), "", body, "").is_none());
+        assert!(hit(&all("kaffe*kanna"), "", body, "").is_some());
+        assert!(hit(&all("f?rg"), "", body, "").is_some());
+        assert!(hit(&all("/m.cca\\w+/"), "", body, "").is_some());
+        assert!(hit(&all("shopping"), "shopping-list", "nothing", "").is_some());
         assert!(matches!(parse("/(unclosed/"), Query::Bad(_)));
         assert!(matches!(parse("/typing"), Query::Empty));
-        let h = hit(&all("kanna"), "", body).unwrap();
+        let h = hit(&all("kanna"), "", body, "").unwrap();
         assert_eq!(&h.snippet[h.marks[0].clone()], "kanna");
     }
 }

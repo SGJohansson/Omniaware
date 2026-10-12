@@ -109,6 +109,10 @@ pub struct App {
     /// The "send to" dialog, when open.
     pub(crate) send_dlg: Option<crate::send_ui::SendDlg>,
     pub(crate) send_hint: Option<crate::send_ui::Hint>,
+    /// Text in images: the helper queue, why it is off (if it is), and a "copy text" waiting for it.
+    ocr: crate::ocr::Queue,
+    ocr_off: Option<String>,
+    ocr_copy: Option<String>,
 }
 
 impl App {
@@ -236,7 +240,14 @@ impl App {
             }
         };
 
+        let ocr = {
+            let c = ctx.clone();
+            crate::ocr::Queue::new(dir.clone(), cfg.ocr.language.clone(), move || c.request_repaint())
+        };
         Self {
+            ocr,
+            ocr_off: None,
+            ocr_copy: None,
             db,
             dir,
             cfg,
@@ -536,6 +547,9 @@ impl App {
                 if b(ui, t::BTN_COPY, theme::p().text) {
                     act = Some(doc::ImgAction::Copy(r.clone()));
                 }
+                if b(ui, t::BTN_COPY_TEXT, theme::p().text) {
+                    act = Some(doc::ImgAction::CopyText(r.clone()));
+                }
                 if b(ui, t::BTN_SAVE_AS, theme::p().text) {
                     act = Some(doc::ImgAction::SaveAs(r.clone()));
                 }
@@ -574,6 +588,7 @@ impl App {
                     log::error(format!("copy image: {e}"));
                 }
             }
+            CopyText(r) => self.copy_text(r),
             SaveAs(r) => {
                 let src = path(&r);
                 let name = format!("omniaware-{}.png", chrono::Local::now().format("%Y%m%d-%H%M%S"));
@@ -810,6 +825,78 @@ impl App {
         self.flash_tray(ctx);
     }
 
+    // ---------- text in images (OCR) ----------
+
+    /// Stores finished readings and hands the helper the next image: a "copy text" first, then the
+    /// newest picture not read yet. Runs on every wake-up; with nothing to read it does nothing.
+    fn ocr_tick(&mut self) {
+        for (blob, done) in self.ocr.results() {
+            use crate::ocr::Done;
+            let stored = match &done {
+                Done::Text(text) => Some((text.as_str(), "ok")),
+                Done::Failed(e) => {
+                    log::error(format!("ocr {blob}: {e}"));
+                    Some(("", "failed"))
+                }
+                Done::NoLanguage(e) => {
+                    // Every picture would fail the same way; try again next start.
+                    log::error(format!("ocr: {e}"));
+                    self.ocr_off = Some(t::OCR_NO_LANGUAGE.into());
+                    None
+                }
+            };
+            if let Some((text, status)) = stored
+                && let Err(e) = self.db.set_ocr(&blob, text, status, &self.cfg.ocr.language)
+            {
+                // Unrecorded, the same picture would come up again: stop for this session.
+                log::error(format!("ocr {blob}: {e}"));
+                self.ocr_off = Some(e.to_string());
+            }
+            if self.ocr_copy.as_deref() == Some(blob.as_str()) {
+                self.ocr_copy = None;
+                match done {
+                    Done::Text(text) => put_text(&text),
+                    Done::NoLanguage(_) => ocr_notice(t::NOTICE_OCR_OFF, t::OCR_NO_LANGUAGE),
+                    Done::Failed(e) => ocr_notice(t::NOTICE_FAILED, &e),
+                }
+            }
+        }
+        if self.ocr.busy().is_some() || self.ocr_off.is_some() || !self.cfg.ocr.enabled {
+            return;
+        }
+        let next = match self.ocr_copy.clone() {
+            Some(b) => Some(b),
+            None => self.db.next_unread_image().map_err(|e| log::error(format!("ocr queue: {e}"))).ok().flatten(),
+        };
+        if let Some(b) = next {
+            let path = doc::blob_path(&self.dir, &b);
+            if path.exists() {
+                self.ocr.send(b, path);
+            } else if let Err(e) = self.db.set_ocr(&b, "", "missing", "") {
+                log::error(format!("ocr {b}: {e}"));
+                self.ocr_off = Some(e.to_string());
+            }
+        }
+    }
+
+    /// "copy text" on a picture: from the database if it has been read, else read it now.
+    pub(crate) fn copy_text(&mut self, blob: String) {
+        if !self.cfg.ocr.enabled {
+            return ocr_notice(t::NOTICE_OCR_OFF, t::OCR_OFF_CONFIG);
+        }
+        if let Some(why) = &self.ocr_off {
+            return ocr_notice(t::NOTICE_OCR_OFF, why);
+        }
+        match self.db.ocr(&blob) {
+            Ok(Some((text, status))) if status == "ok" => put_text(&text),
+            // Not read yet, or it failed before: (re)read it ahead of everything else.
+            _ => {
+                self.ocr_copy = Some(blob);
+                self.ocr_tick();
+            }
+        }
+    }
+
     /// "✓ Saved · Journal · Mon 5 Oct" / "42 words · 1 image · 270.7 kB".
     fn saved_notice(&self, d: &Doc) -> crate::notice::Notice {
         let context = match &d.saved_name {
@@ -1001,6 +1088,7 @@ impl eframe::App for App {
         if let Some(d) = self.main.editor.as_mut() {
             d.tick(&self.db, ctx);
         }
+        self.ocr_tick();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -1067,6 +1155,32 @@ impl eframe::App for App {
             ctx.request_repaint();
         }
     }
+}
+
+/// Recognised text to the clipboard, with a notice saying how much (or that there was none).
+fn put_text(text: &str) {
+    use crate::notice::Notice;
+    if text.trim().is_empty() {
+        return crate::notice::show(Notice::ok(t::NOTICE_NO_TEXT, String::new(), String::new(), None));
+    }
+    if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text.to_string())) {
+        log::error(format!("copy text: {e}"));
+        return crate::notice::show(Notice::error(e.to_string()));
+    }
+    let first: String = text.lines().next().unwrap_or_default().chars().take(60).collect();
+    let detail = t::text_copied_detail(text.split_whitespace().count(), text.chars().count());
+    crate::notice::show(Notice::ok(t::NOTICE_TEXT_COPIED, first, detail, None));
+}
+
+/// A notice that stays until clicked, with its own title (text recognition off, or failed).
+fn ocr_notice(title: &str, detail: &str) {
+    crate::notice::show(crate::notice::Notice {
+        kind: crate::notice::Kind::Error,
+        title: title.into(),
+        context: String::new(),
+        detail: detail.into(),
+        entry: None,
+    });
 }
 
 fn export_failed(path: &std::path::Path, e: &std::io::Error) {

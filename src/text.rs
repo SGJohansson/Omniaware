@@ -87,7 +87,7 @@ pub const TIP_TILE: &str = "Double-click: enlarge · Ctrl+click: select several 
 pub const SHORTCUTS: &str = "Shortcuts";
 pub const SHORTCUTS_TAB: &str = "?  shortcuts · F1";
 pub const SEARCH_HINT: &str = "Search everything…";
-pub const SEARCH_HELP: &str = "words match inside words · * ? wildcards · /regex/";
+pub const SEARCH_HELP: &str = "words match inside words · * ? wildcards · /regex/ · text in images too";
 pub const TIP_TO_BIN: &str = "Moves them to the bin";
 pub const TIP_COPY_TEXT: &str = "Copy the text";
 pub const NAME_HINT_MAIN: &str = "name (optional, F2)";
@@ -211,6 +211,20 @@ pub const NOTICE_SEE_LOG: &str = "see omniaware.log";
 pub const NOTICE_SHOT: &str = "Screenshot";
 pub const SHOT_HINT: &str = "drag an area  ·  click a window  ·  enter: whole screen  ·  esc: cancel";
 pub const SHOT_NO_FILE: &str = "not in Pictures (see log)";
+
+// ---------- text in images (OCR) ----------
+
+pub const SNIPPET_IMAGE: &str = "in image · ";
+pub const BTN_COPY_TEXT: &str = "copy text";
+pub const NOTICE_TEXT_COPIED: &str = "Text copied";
+pub const NOTICE_NO_TEXT: &str = "No text found";
+pub const NOTICE_OCR_OFF: &str = "Text recognition is off";
+pub const OCR_OFF_CONFIG: &str = "[ocr] enabled = false in config.toml";
+pub const OCR_NO_LANGUAGE: &str = "Windows has no OCR for your language. Settings → Time & language → Language & region → your language → Language options → add Optical character recognition.";
+
+pub fn text_copied_detail(words: usize, chars: usize) -> String {
+    format!("{words} {} · {chars} characters", plural(words, "word", "words"))
+}
 
 // ---------- naming ----------
 
@@ -345,7 +359,7 @@ const IMAGES: &[Row] = &[
     (&["Click"], "select"),
     (&["Ctrl", "Click"], "select several"),
     (&["Double-click"], "enlarge"),
-    (&["Right-click"], "copy, save as, open with, show in folder, remove"),
+    (&["Right-click"], "copy, copy text, save as, open with, show in folder, remove"),
     (&["Delete"], "remove the selected"),
     (&["Esc"], "deselect / close the enlarged view"),
 ];
@@ -380,7 +394,7 @@ const SEARCH_KEYS: &[Row] = &[
     (&["Enter"], "open"),
     (&["Shift", "Enter"], "paste into the window you came from"),
 ];
-const SEARCH_NOTE: &str = "Words match inside words (affe finds Kaffekannor). * and ? are wildcards, /…/ is a regular expression.";
+const SEARCH_NOTE: &str = "Words match inside words (affe finds Kaffekannor). * and ? are wildcards, /…/ is a regular expression. Text in pictures and screenshots is found too.";
 const WINDOW_KEYS: &[Row] = &[
     (&["F1"], "show / hide this panel"),
     (&["Ctrl", "Shift", "T"], "next theme"),

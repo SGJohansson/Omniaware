@@ -51,6 +51,15 @@ windows = { version = "0.62", features = [
   "Win32_System_Registry",
   "Win32_Graphics_Dxgi",
   "Win32_Graphics_Dxgi_Common",
+  # OCR helper (src/ocr.rs)
+  "Win32_System_WinRT",
+  "Foundation",
+  "Foundation_Collections",
+  "Globalization",
+  "Graphics_Imaging",
+  "Media_Ocr",
+  "Storage",
+  "Storage_Streams",
 ] }
 
 [profile.release]

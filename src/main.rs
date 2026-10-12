@@ -14,6 +14,7 @@ mod main_view;
 mod text;
 mod markup;
 mod notice;
+mod ocr;
 mod search;
 mod send;
 mod send_ui;
@@ -27,6 +28,10 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--send") {
         std::process::exit(send::run_helper(&args[1..]));
+    }
+    // `omniaware --ocr <image> <out> <language>`: the short-lived text reader (see ocr.rs).
+    if args.first().map(String::as_str) == Some("--ocr") {
+        std::process::exit(ocr::run_helper(&args[1..]));
     }
     // One instance only; a second launch just exits.
     let Some(_instance) = win::single_instance() else {

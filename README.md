@@ -22,6 +22,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 - **Silent capture** — press `Ctrl+C` twice in quick succession and the clipboard (text or image) is saved straight to today's journal. The tray icon briefly turns green; nothing else interrupts you.
 - **One key for everything else** — `Ctrl+Alt+O` opens a small capture window pre-filled with the clipboard. Press it again and the same note expands into the main window: a day-by-day timeline, a month calendar marking days with content, named entries and a recycle bin. Press it a third time to put everything away.
 - **Screenshots** — `Ctrl+Alt+S` freezes every screen under a dimmed overlay, much like `Win+Shift+S`: drag an area, click a window, click the desktop (or press `Enter`) for the whole screen, `Esc` or a right-click to cancel. `Ctrl+Alt+Shift+S` takes the screen under the pointer at once, with nothing shown. Each shot lands in today's journal, on the clipboard and in `Pictures\OA Screenshots` as `OA 2026-10-12 14.32.07.png`, followed by the usual notice. The overlay never takes focus, so a game in borderless full screen is neither minimised nor interrupted; for games with mouselook, use `Ctrl+Alt+Shift+S`.
+- **Text in images** — every screenshot and pasted picture is read in the background with the text recognition built into Windows, so `Ctrl+K` finds the error message in last week's screenshot (the hit is shown as *in image · …*). Right-click a picture → *copy text* puts its text on the clipboard. Nothing leaves the machine, and nothing stays loaded: each picture is read by a short-lived helper process at low priority, so the background cost is unchanged.
 - **Search** — `Ctrl+K` searches everything. Words match anywhere inside words (`affe` finds *Kaffekannor*), `*` and `?` are wildcards, and `/…/` takes a full regular expression. Each hit shows the matching line with the match highlighted; `Shift+Enter` pastes the result straight into the window you came from.
 - **Tidy up in bulk** — every list supports `Ctrl`+click, `Shift`+click and `Ctrl+Shift`+click selection, `Ctrl+A` selects the whole list on screen, and `Delete` moves the selection to the bin. The bin can restore, delete forever or be emptied.
 - **A word when it's saved** — closing a note or capturing silently shows a small notice above the system tray (what was saved, where, and how much). Click it to open the entry; hover to keep it.
@@ -142,7 +143,7 @@ If the name is already taken, press `Enter` again to move it here; the other ent
 | `Enter` | Open |
 | `Shift+Enter` | Paste into the window you came from |
 
-Words match anywhere inside words (`affe` finds *Kaffekannor*), `*` and `?` are wildcards, and `/…/` is a full regular expression.
+Words match anywhere inside words (`affe` finds *Kaffekannor*), `*` and `?` are wildcards, and `/…/` is a full regular expression. Text in pictures and screenshots is searched too.
 
 **Images** (in any entry)
 
@@ -150,7 +151,7 @@ Words match anywhere inside words (`affe` finds *Kaffekannor*), `*` and `?` are 
 |---|---|
 | Click / `Ctrl`+click | Select / select several |
 | Double-click | Enlarge |
-| Right-click | Copy, save as, open with, show in folder, remove |
+| Right-click | Copy, copy text, save as, open with, show in folder, remove |
 | `Delete` | Remove the selected |
 | `Esc` | Deselect, or close the enlarged view |
 
@@ -195,8 +196,11 @@ Everything lives locally in `%APPDATA%\Omniaware\` (override with the `OMNIAWARE
 | `omniaware.db` | All entries, revision history and the search index (SQLite) |
 | `blobs\` | Images, stored content-addressed by their BLAKE3 hash |
 | `send\` | Text handed to shells (cleared after a day) |
+| `ocr\` | A picture's text on its way from the reader to the database (removed straight away) |
 | `config.toml` | Settings; created with defaults on first start |
 | `omniaware.log` | Errors, plus notes on slow window opens and ignored shortcut presses |
+
+Text recognition uses Windows' own OCR for your display language. If a language has no OCR component, add it under *Settings → Time & language → Language & region → (language) → Language options*; until then pictures are simply not searchable, and *copy text* says so.
 
 How it avoids losing data:
 
@@ -230,6 +234,10 @@ main_height = 700.0
 cwd = ""                     # folder shells start in; "" = your home folder
 pwsh = ""                    # "" = pwsh.exe if installed, else Windows PowerShell
 skip_confirm = []            # targets that no longer ask: "pwsh", "cmd", "wsl", "explorer", "window"
+
+[ocr]
+enabled = true               # read the text in pictures so Ctrl+K finds it
+language = ""                # e.g. "sv" or "en-US"; "" = the first Windows display language with OCR
 ```
 
 ## Roadmap

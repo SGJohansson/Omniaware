@@ -16,6 +16,23 @@ pub struct Config {
     pub hotkeys: Hotkeys,
     pub window: WindowCfg,
     pub send: SendCfg,
+    pub ocr: OcrCfg,
+}
+
+/// Text in images (Windows' own recogniser, run in a short-lived helper process).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+pub struct OcrCfg {
+    /// Read the text in pictures so Ctrl+K finds it.
+    pub enabled: bool,
+    /// Language tag such as "sv" or "en-US"; "" = the first Windows display language with OCR.
+    pub language: String,
+}
+
+impl Default for OcrCfg {
+    fn default() -> Self {
+        Self { enabled: true, language: String::new() }
+    }
 }
 
 /// Ctrl+Enter / Ctrl+Shift+Enter: text to a shell (on the prompt line, never run) or Explorer.
@@ -66,6 +83,7 @@ impl Default for Config {
             hotkeys: Hotkeys::default(),
             window: WindowCfg::default(),
             send: SendCfg::default(),
+            ocr: OcrCfg::default(),
         }
     }
 }
@@ -85,8 +103,8 @@ impl Default for WindowCfg {
     }
 }
 
-/// 4: screenshot hotkeys (written into existing files so they can be found and changed).
-pub const CONFIG_VERSION: u32 = 4;
+/// 4: screenshot hotkeys, 5: [ocr] (written into existing files so they can be found and changed).
+pub const CONFIG_VERSION: u32 = 5;
 
 /// %OMNIAWARE_DATA% if set, else %APPDATA%\Omniaware (moved from the pre-rename %APPDATA%\Omniware once).
 pub fn data_dir() -> PathBuf {

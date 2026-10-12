@@ -568,6 +568,8 @@ pub enum ImgAction {
     Open(Img),
     Select(i64, bool),
     Copy(String),
+    /// Text read from the picture (OCR) to the clipboard.
+    CopyText(String),
     SaveAs(String),
     Reveal(String),
     OpenWith(String),
@@ -624,6 +626,9 @@ pub fn image_menu(ui: &mut Ui, blob: &str, targets: Vec<i64>) -> Option<ImgActio
     let item = |ui: &mut Ui, label: &str| ui.button(egui::RichText::new(label).size(13.0)).clicked();
     if item(ui, t::BTN_COPY) {
         act = Some(ImgAction::Copy(blob.to_string()));
+    }
+    if item(ui, t::BTN_COPY_TEXT) {
+        act = Some(ImgAction::CopyText(blob.to_string()));
     }
     if item(ui, t::BTN_SAVE_AS) {
         act = Some(ImgAction::SaveAs(blob.to_string()));

@@ -299,6 +299,22 @@ impl Db {
             tx.execute_batch("ALTER TABLE entry ADD COLUMN export_path TEXT; PRAGMA user_version=4;")?;
             tx.commit()?;
         }
+        if v < 5 {
+            // v5: text read from images (OCR), one row per blob. `status` is "ok" or why it failed,
+            // so a picture that cannot be read is not tried again and again.
+            let tx = self.conn.unchecked_transaction()?;
+            tx.execute_batch(
+                "CREATE TABLE ocr(
+                   blob   TEXT PRIMARY KEY,
+                   text   TEXT NOT NULL DEFAULT '',
+                   status TEXT NOT NULL,
+                   lang   TEXT NOT NULL DEFAULT '',
+                   done   INTEGER NOT NULL
+                 );
+                 PRAGMA user_version=5;",
+            )?;
+            tx.commit()?;
+        }
         Ok(())
     }
 
@@ -494,22 +510,55 @@ impl Db {
         st.query_map([], item_row)?.collect()
     }
 
+    // ---------- text in images (OCR) ----------
+
+    pub fn set_ocr(&self, blob: &str, text: &str, status: &str, lang: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO ocr(blob, text, status, lang, done) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![blob, text, status, lang, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    /// (text, status) if the image has been read.
+    pub fn ocr(&self, blob: &str) -> Result<Option<(String, String)>> {
+        self.conn
+            .query_row("SELECT text, status FROM ocr WHERE blob=?1", [blob], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()
+    }
+
+    /// The newest attached image nobody has read yet.
+    pub fn next_unread_image(&self) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT a.blob FROM attachment a JOIN entry e ON e.id = a.entry_id
+                 WHERE NOT EXISTS (SELECT 1 FROM ocr o WHERE o.blob = a.blob)
+                 ORDER BY e.created DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+    }
+
     /// Search every live entry (see `search::parse`): best score first, then newest.
     pub fn search(&self, q: &crate::search::Query) -> Result<Vec<Item>> {
         let crate::search::Query::All(pats) = q else { return Ok(Vec::new()) };
         let mut st = self.conn.prepare_cached(&format!(
-            "SELECT e.id, e.name, e.body, e.created, 0, {ATT_COLS}
+            "SELECT e.id, e.name, e.body, e.created, 0, {ATT_COLS},
+                    (SELECT group_concat(o.text, char(10)) FROM attachment a JOIN ocr o ON o.blob = a.blob
+                     WHERE a.entry_id = e.id AND o.text != '')
              FROM entry e WHERE e.deleted IS NULL ORDER BY e.created DESC"
         ))?;
         let rows = st.query_map([], |r| {
             let name: Option<String> = r.get(1)?;
             let body: String = r.get(2)?;
-            Ok((item_row(r)?, name.unwrap_or_default(), body))
+            let ocr: Option<String> = r.get(8)?;
+            Ok((item_row(r)?, name.unwrap_or_default(), body, ocr.unwrap_or_default()))
         })?;
         let mut hits = Vec::new();
         for row in rows {
-            let (mut it, name, body) = row?;
-            if let Some(h) = crate::search::hit(pats, &name, &body) {
+            let (mut it, name, body, ocr) = row?;
+            if let Some(h) = crate::search::hit(pats, &name, &body, &ocr) {
                 it.snippet = h.snippet;
                 it.marks = h.marks;
                 hits.push((h.score, it));
@@ -608,6 +657,17 @@ mod tests {
         assert_eq!(db.get(b).unwrap().export_path, None);
         db.set_export_path(b, r"C:\x\adress.txt").unwrap();
         assert_eq!(db.get(b).unwrap().export_path.as_deref(), Some(r"C:\x\adress.txt"));
+
+        // Text read from an attached image is searchable; the snippet says where it came from.
+        let shot = db.insert("").unwrap();
+        db.add_attachment(shot, "ff00.png").unwrap();
+        assert_eq!(db.next_unread_image().unwrap().as_deref(), Some("ff00.png"));
+        db.set_ocr("ff00.png", "Error 0x80070005\nAccess denied", "ok", "sv").unwrap();
+        assert_eq!(db.next_unread_image().unwrap(), None);
+        let hits = db.search(&crate::search::parse("0x8007")).unwrap();
+        assert_eq!(ids(hits.clone()), vec![shot]);
+        assert!(hits[0].snippet.starts_with(crate::text::SNIPPET_IMAGE));
+        assert_eq!(db.ocr("ff00.png").unwrap().unwrap().1, "ok");
 
         db.delete_hard(a).unwrap();
         assert!(db.search(&crate::search::parse("världen")).unwrap().is_empty());
