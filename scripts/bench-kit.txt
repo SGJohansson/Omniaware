@@ -1,0 +1,32 @@
+Omniaware benchmark kit
+=======================
+
+What it is
+  oa-probe.exe measures what Omniaware costs on this machine while it sits in the
+  background: CPU, memory, GPU memory, handles and threads, plus a few scenarios
+  (quick note, main window, a screenshot). Nothing needs installing.
+
+How to run
+  1. Copy this folder anywhere on the machine (a local disk is best).
+  2. Double-click oa-probe.exe. A console window shows the live numbers.
+  3. Leave it for 24-72 hours. It stops by itself after 72 hours; Ctrl+C or closing
+     the window stops it earlier (its Omniaware closes with it).
+
+What it touches
+  Only this folder. The benchmark copy of Omniaware keeps its database, log and
+  screenshots in bench\<COMPUTERNAME>\oa-data, never writes to the clipboard and
+  registers no global shortcuts, so a real Omniaware on the same machine keeps
+  working as usual. Its tray icon says "Omniaware (benchmark)".
+  Scenarios run at most once an hour and only after 10 minutes without keyboard or
+  mouse input, so nobody at the machine is disturbed.
+
+What to bring back
+  The folder bench\<COMPUTERNAME>\: machine.json, samples-*.csv and summary.txt.
+  (oa-data\ can be left behind.)
+
+Options
+  --hours N       run for N hours (72)
+  --interval S    seconds between samples (10)
+  --switch H      hours per renderer before switching wgpu <-> glow (2)
+  --idle M        minutes without input before a scenario may run (10)
+  --no-scenarios  only measure the idle background cost

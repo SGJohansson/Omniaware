@@ -144,7 +144,8 @@ impl App {
                     (&cfg.hotkeys.screenshot_full, |s| &s.shot_full),
                 ];
                 for (spec, flag) in specs {
-                    if spec.trim().is_empty() {
+                    // A benchmark copy leaves the global keys to the real Omniaware.
+                    if spec.trim().is_empty() || crate::bench::active() {
                         continue;
                     }
                     match spec.parse::<HotKey>().map_err(|e| e.to_string()).and_then(|hk| {
@@ -176,6 +177,17 @@ impl App {
         {
             let (s, c) = (sig.clone(), ctx.clone());
             win::on_double_copy(move || poke(&s, &c, |s| &s.stash));
+        }
+        if crate::bench::active() {
+            let (s, c) = (sig.clone(), ctx.clone());
+            crate::bench::listen(move |cmd| {
+                use crate::bench::Command;
+                match cmd {
+                    Command::Capture => poke(&s, &c, |s| &s.capture),
+                    Command::ShotFull => poke(&s, &c, |s| &s.shot_full),
+                    Command::Quit => poke(&s, &c, |s| &s.quit),
+                }
+            });
         }
         {
             let (s, c) = (sig.clone(), ctx.clone());

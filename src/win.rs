@@ -43,7 +43,9 @@ mod imp {
 
     pub fn single_instance() -> Option<Instance> {
         unsafe {
-            let h = CreateMutexW(None, true, w!("Local\\Omniaware.SingleInstance")).ok()?;
+            // Benchmark runs are guests: they must not stop (or be stopped by) a real Omniaware.
+            let name = if crate::bench::active() { w!("Local\\Omniaware.Bench") } else { w!("Local\\Omniaware.SingleInstance") };
+            let h = CreateMutexW(None, true, name).ok()?;
             if GetLastError() == ERROR_ALREADY_EXISTS {
                 let _ = CloseHandle(h);
                 return None;

@@ -19,7 +19,7 @@ pub fn build() -> Result<Tray, Box<dyn std::error::Error>> {
     let icon = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false)
-        .with_tooltip(crate::app::TITLE)
+        .with_tooltip(if crate::bench::active() { "Omniaware (benchmark)" } else { crate::app::TITLE })
         .with_icon(make_icon(TEAL)?)
         .build()?;
     Ok(Tray {

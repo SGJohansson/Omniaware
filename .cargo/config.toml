@@ -1,0 +1,4 @@
+# Static C runtime: omniaware.exe and oa-probe.exe run on a bare Windows install,
+# without the Visual C++ redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

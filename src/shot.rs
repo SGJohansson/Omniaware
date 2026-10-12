@@ -69,17 +69,23 @@ fn save(data_dir: &Path, f: Frame, when: chrono::DateTime<chrono::Local>) -> Out
     };
     let src = crate::blob::path_for(data_dir, &hash, "png");
     let bytes = std::fs::metadata(&src).map(|m| m.len()).unwrap_or(0);
-    let file = imp::pictures().ok_or_else(|| "Pictures folder not found".to_string()).and_then(|pics| {
-        let dir = pics.join(FOLDER);
+    // A benchmark run keeps everything in its own folder and leaves the clipboard alone.
+    let bench = crate::bench::active();
+    let folder = if bench { Some(data_dir.join("shots")) } else { imp::pictures().map(|p| p.join(FOLDER)) };
+    let file = folder.ok_or_else(|| "Pictures folder not found".to_string()).and_then(|dir| {
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let dst = free_path(&dir, &file_name(when));
         std::fs::copy(&src, &dst).map_err(|e| format!("{}: {e}", dst.display()))?;
         Ok(dst)
     });
-    let clipboard = arboard::Clipboard::new()
-        .and_then(|mut c| c.set_image(arboard::ImageData { width: w as usize, height: h as usize, bytes: px.into() }))
-        .err()
-        .map(|e| e.to_string());
+    let clipboard = if bench {
+        None
+    } else {
+        arboard::Clipboard::new()
+            .and_then(|mut c| c.set_image(arboard::ImageData { width: w as usize, height: h as usize, bytes: px.into() }))
+            .err()
+            .map(|e| e.to_string())
+    };
     Outcome::Saved(Saved { hash, w, h, bytes, file, clipboard })
 }
 

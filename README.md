@@ -182,6 +182,10 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1            # add -S
 
 Run it again after pulling a new version; it closes the running copy, replaces it and starts the new one. Your data is not touched.
 
+### Measuring resource use
+
+Omniaware is meant to sit in the background all day, so what it costs there is measured rather than guessed. Every CI build has an `omniaware-bench-kit` artifact: `omniaware.exe`, `oa-probe.exe` and a short guide. Unzip it on any Windows machine and run `oa-probe.exe`; it starts a separate benchmark copy of Omniaware (its own data, no global shortcuts, no clipboard writes, so a real copy keeps running) and records CPU, memory, GPU memory, handles and threads for up to 72 hours, alternating the `wgpu` and `glow` renderers. Results, including a description of the machine, are written next to the probe in `bench\<COMPUTERNAME>\`.
+
 ## Data and durability
 
 Everything lives locally in `%APPDATA%\Omniaware\` (override with the `OMNIAWARE_DATA` environment variable). Nothing is sent anywhere.
