@@ -8,7 +8,7 @@ I built Omniaware to replace a patchwork of AutoHotkey pop-ups, a separate Markd
 >
 > **Forgot a shortcut?** Press `F1` anywhere in Omniaware for the full list, or see [Keyboard shortcuts](#keyboard-shortcuts).
 
-![Omniaware main window: timeline, calendar and named entries](assets/screenshots/main-window.png)
+![Omniaware main window: timeline, calendar and named entries](assets/screenshots/Omniaware_themes.png)
 
 ## Features
 
